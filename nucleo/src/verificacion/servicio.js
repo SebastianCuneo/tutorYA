@@ -4,6 +4,7 @@ const eventos = require('../eventos');
 
 const ESTADOS = ['PENDIENTE', 'LLAMADA_AGENDADA', 'APROBADO', 'RECHAZADO'];
 
+// Reacciona al evento docente.registrado: abre la solicitud de verificación (PENDIENTE).
 async function alRegistrarseDocente({ docenteId }) {
   await repo.crearSolicitud(docenteId);
 }
@@ -13,6 +14,7 @@ async function listarSolicitudes(estado) {
   return repo.listar(estado || null);
 }
 
+// HU10, paso 1: PENDIENTE -> LLAMADA_AGENDADA.
 async function agendarLlamada(id, verificadorId, body = {}) {
   const fecha = new Date(body.fecha);
   if (typeof body.fecha !== 'string' || Number.isNaN(fecha.getTime())) throw E.validacion('fecha inválida (ISO 8601)');
@@ -22,6 +24,7 @@ async function agendarLlamada(id, verificadorId, body = {}) {
   throw E.conflicto('Solo se puede agendar la llamada de una solicitud PENDIENTE');
 }
 
+// HU10, paso 2: LLAMADA_AGENDADA -> APROBADO/RECHAZADO; avisa a Docentes por evento.
 async function resolverSolicitud(id, verificadorId, body = {}) {
   const { resultado } = body;
   if (!['APROBADO', 'RECHAZADO'].includes(resultado)) throw E.validacion('resultado debe ser APROBADO o RECHAZADO');

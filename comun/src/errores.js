@@ -1,5 +1,6 @@
 const logger = require('./logger');
 
+// Error controlado: lleva el status HTTP y un código de negocio.
 class ErrorApi extends Error {
   constructor(status, codigo, mensaje) {
     super(mensaje);
@@ -8,6 +9,7 @@ class ErrorApi extends Error {
   }
 }
 
+// Fábricas de errores según el status HTTP.
 const E = {
   validacion: (m) => new ErrorApi(400, 'VALIDACION', m),
   noAutenticado: (m = 'Token ausente o inválido') => new ErrorApi(401, 'NO_AUTENTICADO', m),
@@ -27,6 +29,7 @@ function rutaNoEncontrada(req, res, next) {
 }
 
 // eslint-disable-next-line no-unused-vars
+// Último middleware: todo error sale como { error: { codigo, mensaje } }; lo inesperado es 500.
 function manejadorErrores(err, req, res, next) {
   if (err.type === 'entity.parse.failed') {
     err = E.validacion('JSON inválido en el body');

@@ -4,6 +4,7 @@ const logger = require('./logger');
 // numeric -> number (montos y precios)
 types.setTypeParser(1700, parseFloat);
 
+// Un pool por proceso; cada réplica abre sus propias conexiones a la misma base.
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: Number(process.env.DB_PORT || 5432),

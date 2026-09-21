@@ -6,6 +6,7 @@ const app = express();
 app.use(middlewareInstancia);
 app.use(logger.middlewareLog);
 app.use(express.json());
+// Servicio independiente: solo expone el router de Reservas.
 app.use(reservas.router);
 app.use(rutaNoEncontrada);
 app.use(manejadorErrores);

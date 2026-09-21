@@ -11,6 +11,7 @@ function firmarToken({ id, rol, esMenor }) {
   return jwt.sign({ sub: String(id), rol, esMenor: !!esMenor }, secreto(), { expiresIn: '8h' });
 }
 
+// Middleware: valida el JWT (Bearer) y deja el usuario en req.usuario. Sin sesión en servidor => sin estado.
 function autenticar(req, res, next) {
   const cab = req.headers.authorization || '';
   const [tipo, token] = cab.split(' ');
@@ -24,6 +25,7 @@ function autenticar(req, res, next) {
   }
 }
 
+// Middleware: autorización por rol (403 si el rol del token no está permitido).
 function requerirRol(...roles) {
   return (req, res, next) => {
     if (!req.usuario || !roles.includes(req.usuario.rol)) {

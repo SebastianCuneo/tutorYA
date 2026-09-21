@@ -1,5 +1,6 @@
 const { db } = require('../../../comun');
 
+// ON CONFLICT DO NOTHING: hace idempotente el manejo del evento.
 async function crearPerfil(usuarioId, nombre) {
   await db.query(
     `INSERT INTO docentes.perfiles (usuario_id, nombre, estado)

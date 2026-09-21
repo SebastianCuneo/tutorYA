@@ -3,6 +3,7 @@ const repo = require('./repositorio');
 const nucleo = require('./clienteNucleo');
 const simulador = require('./pagos/simulador');
 
+// Si el núcleo no responde (red/timeout) => 503: ante la duda no se reserva.
 async function llamarNucleo(fn) {
   try {
     return await fn();
@@ -12,6 +13,7 @@ async function llamarNucleo(fn) {
   }
 }
 
+// HU5/HU6: validar estudiante y disponibilidad (HTTP al núcleo) y luego reservar + cobrar en una transacción.
 async function reservarClase(estudiante, body = {}) {
   const docenteId = Number(body.docenteId);
   const horarioId = Number(body.horarioId);
@@ -36,6 +38,8 @@ async function reservarClase(estudiante, body = {}) {
   const monto = disp.body.horario.precio;
 
   // 3. Transacción ACID con un cliente dedicado del pool.
+  // Reserva y pago son atómicos: si el pago falla se revierte la reserva. El UNIQUE(horario_id)
+  // hace que, de dos pedidos concurrentes, el segundo espere y luego falle con 409.
   const cliente = await db.pool.connect();
   try {
     await cliente.query('BEGIN');
@@ -75,6 +79,7 @@ async function obtenerReserva(usuario, id) {
   return { reserva: r, pago: await repo.obtenerPago(id) };
 }
 
+// HU11: solo el docente dueño; CONFIRMADA -> DICTADA (UPDATE condicional, evita doble transición).
 async function confirmarClaseDictada(docente, id) {
   const r = await repo.obtener(id);
   if (!r) throw E.noEncontrado('Reserva no encontrada');

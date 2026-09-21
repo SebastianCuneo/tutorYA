@@ -11,6 +11,7 @@ function texto(v) {
   return typeof v === 'string' ? v.trim() : '';
 }
 
+// HU1/HU7: registro. Menor de edad => queda PENDIENTE hasta que el adulto autorice (HU2).
 async function registrarUsuario(body = {}) {
   const email = texto(body.email).toLowerCase();
   const nombre = texto(body.nombre);
@@ -27,6 +28,7 @@ async function registrarUsuario(body = {}) {
     if (!emailAdulto || !REGEX_EMAIL.test(emailAdulto)) throw E.validacion('emailAdulto es obligatorio para menores');
   }
 
+  // Token aleatorio de un solo uso para el link de autorización del adulto.
   const token = esMenor ? crypto.randomBytes(24).toString('hex') : null;
   let usuario;
   try {
@@ -58,12 +60,14 @@ async function registrarUsuario(body = {}) {
   // Simula el email al adulto responsable: no se envía nada, se devuelve el link.
   if (esMenor) respuesta.linkAutorizacion = `${URL_PUBLICA}/api/autorizaciones/${token}`;
 
+  // Comunicación entre módulos por evento: Docentes crea el perfil y Verificación la solicitud.
   if (rol === 'DOCENTE') {
     await eventos.emitir('docente.registrado', { docenteId: usuario.id, nombre: usuario.nombre, email: usuario.email });
   }
   return respuesta;
 }
 
+// Valida credenciales con bcrypt y devuelve un JWT (payload: sub, rol, esMenor).
 async function login(body = {}) {
   const email = texto(body.email).toLowerCase();
   if (!email || typeof body.password !== 'string') throw E.validacion('email y password son obligatorios');
@@ -74,6 +78,7 @@ async function login(body = {}) {
   return { token: auth.firmarToken({ id: u.id, rol: u.rol, esMenor: u.es_menor }) };
 }
 
+// HU2: el adulto abre el link; el token se consume una sola vez (410 si ya se usó).
 async function autorizarMenor(token) {
   const { resultado, usuarioId } = await repo.autorizarConToken(token);
   if (resultado === 'NO_EXISTE') throw E.noEncontrado('Token de autorización inexistente');
@@ -81,6 +86,7 @@ async function autorizarMenor(token) {
   return { usuarioId, estado: 'AUTORIZADO' };
 }
 
+// Usada por Reservas (vía HTTP interno) para decidir si un estudiante puede reservar.
 async function consultarEstadoEstudiante(id) {
   const u = await repo.buscarPorId(id);
   if (!u) throw E.noEncontrado('Usuario no encontrado');

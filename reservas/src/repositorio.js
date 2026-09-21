@@ -40,6 +40,7 @@ async function obtenerPago(reservaId) {
   return rows[0] || null;
 }
 
+// UPDATE condicional: solo cambia si sigue CONFIRMADA.
 async function marcarDictada(id) {
   const { rows } = await db.query(
     `UPDATE reservas.reservas SET estado = 'DICTADA' WHERE id = $1 AND estado = 'CONFIRMADA' RETURNING ${RESERVA}`,
@@ -48,6 +49,7 @@ async function marcarDictada(id) {
   return rows[0] || null;
 }
 
+// Alimenta la búsqueda de docentes (Núcleo la consulta por HTTP interno).
 async function horariosOcupados(docenteId) {
   const { rows } = await db.query('SELECT horario_id FROM reservas.reservas WHERE docente_id = $1', [docenteId]);
   return rows.map((r) => r.horario_id);

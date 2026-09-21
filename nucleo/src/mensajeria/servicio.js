@@ -9,6 +9,7 @@ function validarTexto(texto) {
   return texto.trim();
 }
 
+// HU4: el estudiante escribe a un docente APROBADO; la conversación se crea al primer mensaje.
 async function enviarMensaje(estudianteId, body = {}) {
   const docenteId = Number(body.docenteId);
   if (!Number.isInteger(docenteId)) throw E.validacion('docenteId inválido');
@@ -20,6 +21,7 @@ async function enviarMensaje(estudianteId, body = {}) {
   return { conversacionId: conv.id, mensaje };
 }
 
+// Solo el estudiante o el docente de la conversación pueden verla (403 si no).
 async function conversacionDelParticipante(id, usuarioId) {
   const conv = await repo.obtenerConversacion(id);
   if (!conv) throw E.noEncontrado('Conversación no encontrada');
@@ -27,6 +29,7 @@ async function conversacionDelParticipante(id, usuarioId) {
   return conv;
 }
 
+// HU9: el docente responde dentro de una conversación propia.
 async function responderMensaje(docenteId, conversacionId, body = {}) {
   const texto = validarTexto(body.texto);
   const conv = await conversacionDelParticipante(conversacionId, docenteId);

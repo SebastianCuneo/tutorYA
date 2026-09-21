@@ -28,6 +28,7 @@ router.patch('/api/reservas/:id/dictada', auth.autenticar, auth.requerirRol('DOC
   res.json(await servicio.confirmarClaseDictada(req.usuario, idParam(req)));
 }));
 
+// Ruta interna: Nginx no la expone; solo la usa el Núcleo dentro de la red de Docker.
 router.get('/internal/reservas/horarios-ocupados', asyncH(async (req, res) => {
   const docenteId = Number(req.query.docenteId);
   if (!Number.isInteger(docenteId)) throw E.validacion('docenteId inválido');
