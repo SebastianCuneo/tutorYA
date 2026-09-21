@@ -1,0 +1,11 @@
+{
+  "name": "tutorya-nucleo",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/app.js",
+  "scripts": { "start": "node src/app.js" },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^4.21.0"
+  }
+}
