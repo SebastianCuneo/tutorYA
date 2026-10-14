@@ -13,7 +13,7 @@ CREATE TABLE usuarios.usuarios (
   email         text UNIQUE NOT NULL,
   password_hash text NOT NULL,
   nombre        text NOT NULL,
-  rol           text NOT NULL CHECK (rol IN ('ESTUDIANTE','DOCENTE','VERIFICADOR')),
+  rol           text NOT NULL CHECK (rol IN ('ESTUDIANTE','DOCENTE','VERIFICADOR','ADMIN')),
   es_menor      boolean NOT NULL DEFAULT false,
   email_adulto  text,
   estado        text NOT NULL DEFAULT 'AUTORIZADO' CHECK (estado IN ('PENDIENTE','AUTORIZADO')),
@@ -100,3 +100,8 @@ CREATE TABLE reservas.pagos (
 INSERT INTO usuarios.usuarios (email, password_hash, nombre, rol, estado)
 VALUES ('verificador@tutorya.uy', '$2a$10$R/DCwQC/P9qOhnuwThaeiuGaLT5G4e1ZeJbVjHgC3nE1Pr20CBiqS',
         'Verificador TutorYa', 'VERIFICADOR', 'AUTORIZADO');
+
+-- UT4: administrador (config, circuitos, métricas). Password: admin123
+INSERT INTO usuarios.usuarios (email, password_hash, nombre, rol, estado)
+VALUES ('admin@tutorya.uy', '$2a$10$1LqXWgckjGXCeAS0nUzEbudgkkiEv9N8nDwOgdUmX3t311eqtuVEa',
+        'Admin TutorYa', 'ADMIN', 'AUTORIZADO');

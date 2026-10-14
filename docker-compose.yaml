@@ -8,6 +8,8 @@ x-entorno-app: &entorno-app
   DB_NAME: tutorya
   JWT_SECRET: ${JWT_SECRET:-dev-secret-cambiar}
   PORT: "3000"
+  REDIS_URL: redis://redis:6379
+  APP_VERSION: ${APP_VERSION:-ut4}
 
 services:
   db:
@@ -25,6 +27,19 @@ services:
       timeout: 3s
       retries: 20
 
+  # Caché (Cache-Aside) y almacén de configuración (External Configuration Store).
+  redis:
+    image: redis:7-alpine
+    # AOF: la config sobrevive a un reinicio de Redis (la caché se pierde, no importa).
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
   # Sin container_name, sin volúmenes y sin puertos publicados: permite --scale.
   nucleo:
     build:
@@ -37,6 +52,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     deploy:
       replicas: 2
 
@@ -50,6 +67,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     deploy:
       replicas: 2
 
@@ -67,3 +86,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

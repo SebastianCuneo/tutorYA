@@ -1,5 +1,5 @@
 const express = require('express');
-const { middlewareInstancia, rutaNoEncontrada, manejadorErrores, db, logger } = require('../../comun');
+const { middlewareInstancia, rutaNoEncontrada, manejadorErrores, db, logger, config } = require('../../comun');
 const reservas = require('./index');
 
 const app = express();
@@ -13,6 +13,7 @@ app.use(manejadorErrores);
 
 async function main() {
   await db.esperarDb();
+  await config.iniciar();
   const puerto = Number(process.env.PORT || 3000);
   app.listen(puerto, () => logger.info(`reservas escuchando en :${puerto}`));
 }

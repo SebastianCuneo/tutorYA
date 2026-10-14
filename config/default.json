@@ -1,0 +1,13 @@
+{
+  "circuitBreaker.habilitado": true,
+  "circuitBreaker.umbral": 5,
+  "circuitBreaker.ventanaMs": 10000,
+  "circuitBreaker.esperaMs": 15000,
+  "http.timeoutMs": 2000,
+  "cache.habilitado": true,
+  "cache.catalogoTtlSeg": 60,
+  "catalogo.fuente": "vista",
+  "catalogo.refrescoSeg": 60,
+  "salud.timeoutChequeoMs": 1000,
+  "log.nivel": "info"
+}

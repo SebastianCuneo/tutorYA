@@ -8,6 +8,7 @@ COPY nucleo/package.json nucleo/package-lock.json ./nucleo/
 RUN cd nucleo && npm ci --omit=dev
 
 COPY comun ./comun
+COPY config ./config
 COPY nucleo ./nucleo
 
 WORKDIR /app/nucleo

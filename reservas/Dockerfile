@@ -8,6 +8,7 @@ COPY reservas/package.json reservas/package-lock.json ./reservas/
 RUN cd reservas && npm ci --omit=dev
 
 COPY comun ./comun
+COPY config ./config
 COPY reservas ./reservas
 
 WORKDIR /app/reservas
