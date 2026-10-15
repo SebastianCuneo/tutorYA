@@ -1,0 +1,2 @@
+# Los scripts de demo se ejecutan con bash (también en Git Bash de Windows): siempre LF.
+*.sh text eol=lf

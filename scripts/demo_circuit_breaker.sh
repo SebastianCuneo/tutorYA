@@ -68,8 +68,11 @@ check "6 reservas con 503 tras esperar ≈ timeout (${TIMEOUT_MS} ms)" 6 "$LENTA
 
 paso "3. CON circuito: se rehabilita (el PUT va al núcleo, así que se descongela un momento)"
 docker compose unpause nucleo 2>&1 | tail -1
-set_config '{"circuitBreaker.habilitado":true}' >/dev/null
-check "circuito habilitado" 200 "$CODIGO"
+# Cada intento tarda ≈ timeout + lo que cueste lanzar curl/jq (en Git Bash de Windows, cientos de ms):
+# con la ventana por defecto (10 s) las 5 fallas pueden no caer juntas. Se amplía solo durante la prueba.
+VENTANA_MS=$(( (UMBRAL + 1) * TIMEOUT_MS * 3 ))
+set_config "$(jq -nc --argjson v "$VENTANA_MS" '{"circuitBreaker.habilitado":true,"circuitBreaker.ventanaMs":$v}')" >/dev/null
+check "circuito habilitado (ventanaMs=$VENTANA_MS)" 200 "$CODIGO"
 docker compose pause nucleo 2>&1 | tail -1
 for i in $(seq 1 12); do
   intentar_reserva "con circuito" "$H2"

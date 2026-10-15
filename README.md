@@ -226,6 +226,9 @@ final deja todo como estaba (config por defecto, contenedores reanudados, répli
   en que cada una abre no es determinístico. Al final se vuelve a 2.
 - La demo descongela el núcleo un momento para rehabilitar el circuito: el `PUT /api/admin/config`
   vive en el Núcleo.
+- Durante la prueba la demo amplía `circuitBreaker.ventanaMs` a `(umbral + 1) × timeout × 3`. Cada
+  intento tarda ≈ timeout más el costo de lanzar `curl`/`jq`, que en Git Bash de Windows son cientos de ms:
+  con la ventana por defecto (10 s) las 5 fallas no siempre caen dentro de la misma ventana.
 
 **Health Endpoint Monitoring**
 - Cada servicio chequea solo su propia base (`db-nucleo` o `db-reservas`). Con `db-nucleo` caída el
