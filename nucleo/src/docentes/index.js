@@ -8,6 +8,8 @@ eventos.on('docente.registrado', servicio.alRegistrarse);
 eventos.on('docente.verificado', servicio.alVerificarse);
 // Evento entre servicios (Redis pub/sub): Reservas avisa; Docentes invalida su propia caché.
 redis.suscribir('reservas:eventos', servicio.alEventoReservas);
+// Materialized View: refresco periódico del catálogo.
+servicio.iniciarRefrescoPeriodico();
 
 module.exports = {
   // Interfaz: BuscarDocentes (HU3)

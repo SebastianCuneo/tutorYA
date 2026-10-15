@@ -55,4 +55,12 @@ async function horariosOcupados(docenteId) {
   return rows.map((r) => r.horario_id);
 }
 
-module.exports = { insertarReserva, insertarPago, listarPorUsuario, obtener, obtenerPago, marcarDictada, horariosOcupados };
+async function horariosOcupadosDe(docenteIds) {
+  const { rows } = await db.query(
+    'SELECT docente_id, horario_id FROM reservas.reservas WHERE docente_id = ANY($1::int[])',
+    [docenteIds]
+  );
+  return rows;
+}
+
+module.exports = { horariosOcupadosDe, insertarReserva, insertarPago, listarPorUsuario, obtener, obtenerPago, marcarDictada, horariosOcupados };

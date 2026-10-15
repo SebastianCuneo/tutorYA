@@ -9,5 +9,6 @@ module.exports = {
   listarReservas: servicio.listarReservas,
   obtenerReserva: servicio.obtenerReserva,
   horariosOcupados: servicio.horariosOcupados,
+  horariosOcupadosDe: servicio.horariosOcupadosDe,
   router: require('./rutas'),
 };

@@ -97,4 +97,11 @@ async function confirmarClaseDictada(docente, id) {
 
 const horariosOcupados = async (docenteId) => ({ docenteId, horarioIds: await repo.horariosOcupados(docenteId) });
 
-module.exports = { reservarClase, listarReservas, obtenerReserva, confirmarClaseDictada, horariosOcupados };
+// Varios docentes en una consulta; todos los pedidos aparecen en la respuesta (con [] si no tienen).
+async function horariosOcupadosDe(docenteIds) {
+  const ocupados = Object.fromEntries(docenteIds.map((id) => [id, []]));
+  for (const { docente_id: d, horario_id: h } of await repo.horariosOcupadosDe(docenteIds)) ocupados[d].push(h);
+  return { ocupados };
+}
+
+module.exports = { reservarClase, listarReservas, obtenerReserva, confirmarClaseDictada, horariosOcupados, horariosOcupadosDe };

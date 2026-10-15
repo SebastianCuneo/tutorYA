@@ -38,7 +38,14 @@ router.patch('/api/reservas/:id/dictada', auth.autenticar, auth.requerirRol('DOC
 }));
 
 // Ruta interna: Nginx no la expone; solo la usa el Núcleo dentro de la red de Docker.
+// ?docenteIds=1,2,3 (una llamada por búsqueda) -> { ocupados: { "1": [ids], ... } }
+// ?docenteId=1 (UT3)                          -> { docenteId, horarioIds }
 router.get('/internal/reservas/horarios-ocupados', asyncH(async (req, res) => {
+  if (req.query.docenteIds !== undefined) {
+    const ids = String(req.query.docenteIds).split(',').filter(Boolean).map(Number);
+    if (!ids.length || ids.length > 1000 || !ids.every(Number.isInteger)) throw E.validacion('docenteIds inválido');
+    return res.json(await servicio.horariosOcupadosDe(ids));
+  }
   const docenteId = Number(req.query.docenteId);
   if (!Number.isInteger(docenteId)) throw E.validacion('docenteId inválido');
   res.json(await servicio.horariosOcupados(docenteId));

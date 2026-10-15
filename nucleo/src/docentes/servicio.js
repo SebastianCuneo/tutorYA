@@ -1,19 +1,21 @@
-const { E, getJson, logger, CircuitBreaker, CircuitoAbiertoError } = require('../../../comun');
+const { E, getJson, logger, config, CircuitBreaker, CircuitoAbiertoError } = require('../../../comun');
 const repo = require('./repositorio');
 const cache = require('./cache');
 
 const RESERVAS_URL = process.env.RESERVAS_URL || 'http://reservas:3000';
 const circuitoReservas = new CircuitBreaker('reservas');
 
-// Pide a Reservas (por HTTP, a través del circuito) los horarios ocupados de un docente.
-// null si Reservas no responde o el circuito está abierto => degradación elegante.
-async function horariosOcupados(docenteId) {
+// Pide a Reservas (por HTTP, a través del circuito) los horarios ocupados de TODOS los docentes
+// de la búsqueda en una sola llamada. Devuelve { docenteId: Set(horarioIds) }, o null si Reservas
+// no responde o el circuito está abierto => degradación elegante.
+async function horariosOcupados(docenteIds) {
+  if (!docenteIds.length) return {};
   try {
     const { status, body } = await circuitoReservas.ejecutar(() =>
-      getJson(`${RESERVAS_URL}/internal/reservas/horarios-ocupados?docenteId=${docenteId}`)
+      getJson(`${RESERVAS_URL}/internal/reservas/horarios-ocupados?docenteIds=${docenteIds.join(',')}`)
     );
     if (status !== 200) return null;
-    return new Set(body.horarioIds);
+    return Object.fromEntries(Object.entries(body.ocupados).map(([id, hs]) => [id, new Set(hs)]));
   } catch (e) {
     if (e instanceof CircuitoAbiertoError) logger.debug('circuito reservas abierto, degradación elegante');
     else logger.warn('Reservas no responde, degradación elegante', { error: e.message });
@@ -28,24 +30,46 @@ async function buscarDocentes(materia) {
   return cache.obtener(filtro, () => armarCatalogo(filtro));
 }
 
+// catalogo.fuente = "vista": una consulta a la vista materializada docentes.catalogo.
+// catalogo.fuente = "tablas": camino de la UT3 (1 consulta + 2 por docente), para comparar.
 async function armarCatalogo(filtro) {
+  const docentes = config.get('catalogo.fuente') === 'tablas' ? await desdeTablas(filtro) : await desdeVista(filtro);
+  const ocupados = await horariosOcupados(docentes.map((d) => d.id));
+  return docentes.map((d) => {
+    const suyos = ocupados && ocupados[d.id];
+    return {
+      id: d.id,
+      nombre: d.nombre,
+      materias: d.materias,
+      horarios: suyos ? d.horarios.filter((h) => !suyos.has(h.id)) : d.horarios,
+      disponibilidadVerificada: ocupados !== null,
+    };
+  });
+}
+
+async function desdeTablas(filtro) {
   const docentes = await repo.listarAprobados(filtro);
   return Promise.all(
     docentes.map(async (d) => {
-      const [materias, horarios, ocupados] = await Promise.all([
-        repo.materiasDe(d.usuario_id),
-        repo.horariosDe(d.usuario_id, true),
-        horariosOcupados(d.usuario_id),
-      ]);
-      return {
-        id: d.usuario_id,
-        nombre: d.nombre,
-        materias,
-        horarios: ocupados ? horarios.filter((h) => !ocupados.has(h.id)) : horarios,
-        disponibilidadVerificada: ocupados !== null,
-      };
+      const [materias, horarios] = await Promise.all([repo.materiasDe(d.usuario_id), repo.horariosDe(d.usuario_id, true)]);
+      return { id: d.usuario_id, nombre: d.nombre, materias, horarios };
     })
   );
+}
+
+// La vista guarda los horarios como jsonb: se normalizan las fechas al mismo formato que el camino
+// por tablas y se descartan los que pasaron desde el último refresco.
+async function desdeVista(filtro) {
+  const ahora = Date.now();
+  const filas = await repo.buscarEnCatalogo(filtro);
+  return filas.map((f) => ({
+    id: f.docente_id,
+    nombre: f.nombre,
+    materias: f.materias_nombres,
+    horarios: f.horarios
+      .map((h) => ({ id: h.id, inicio: new Date(h.inicio), fin: new Date(h.fin), precio: Number(h.precio) }))
+      .filter((h) => h.inicio.getTime() > ahora),
+  }));
 }
 
 async function obtenerPerfilCompleto(docenteId) {
@@ -109,9 +133,31 @@ async function alVerificarse({ docenteId, resultado }) {
   await alCambiarCatalogo('verificacion');
 }
 
-// Cualquier cambio del catálogo invalida la caché (no se lanza: la escritura ya se hizo).
+// Cualquier cambio del catálogo: PRIMERO refresca la vista, DESPUÉS invalida la caché
+// (al revés, una lectura entre medio volvería a cachear la vista vieja).
+// No se lanza: la escritura ya se hizo; la vista se pone al día en el próximo refresco periódico.
 async function alCambiarCatalogo(motivo) {
+  try {
+    await repo.refrescarCatalogo({ esperar: true });
+  } catch (e) {
+    logger.warn('no se pudo refrescar el catálogo', { motivo, error: e.message });
+  }
   await cache.invalidar(motivo);
+}
+
+// Refresco periódico (catalogo.refrescoSeg, leído en cada vuelta): si otra réplica ya está
+// refrescando (pg_try_advisory_lock ocupado), se saltea esta vuelta.
+function iniciarRefrescoPeriodico() {
+  const vuelta = async () => {
+    try {
+      const hecho = await repo.refrescarCatalogo({ esperar: false });
+      logger.debug(hecho ? 'catálogo refrescado (periódico)' : 'refresco periódico salteado: otra réplica refresca');
+    } catch (e) {
+      logger.warn('refresco periódico del catálogo falló', { error: e.message });
+    }
+    setTimeout(vuelta, config.get('catalogo.refrescoSeg') * 1000).unref();
+  };
+  setTimeout(vuelta, config.get('catalogo.refrescoSeg') * 1000).unref();
 }
 
 // Reservas publica reserva.creada (después del COMMIT): cambian los horarios libres => invalidar.
@@ -128,4 +174,5 @@ module.exports = {
   buscarDocentes, obtenerPerfilCompleto, actualizarMaterias, agregarHorario,
   consultarDisponibilidad, obtenerEstadoDocente, alVerificarse, alRegistrarse, alEventoReservas,
   metricasCache: cache.metricas,
+  iniciarRefrescoPeriodico,
 };
