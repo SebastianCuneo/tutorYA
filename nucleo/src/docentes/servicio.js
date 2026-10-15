@@ -1,16 +1,21 @@
-const { E, getJson, logger } = require('../../../comun');
+const { E, getJson, logger, CircuitBreaker, CircuitoAbiertoError } = require('../../../comun');
 const repo = require('./repositorio');
 
 const RESERVAS_URL = process.env.RESERVAS_URL || 'http://reservas:3000';
+const circuitoReservas = new CircuitBreaker('reservas');
 
-// Pide a Reservas (por HTTP) los horarios ocupados de un docente. null si Reservas no responde.
+// Pide a Reservas (por HTTP, a través del circuito) los horarios ocupados de un docente.
+// null si Reservas no responde o el circuito está abierto => degradación elegante.
 async function horariosOcupados(docenteId) {
   try {
-    const { status, body } = await getJson(`${RESERVAS_URL}/internal/reservas/horarios-ocupados?docenteId=${docenteId}`);
+    const { status, body } = await circuitoReservas.ejecutar(() =>
+      getJson(`${RESERVAS_URL}/internal/reservas/horarios-ocupados?docenteId=${docenteId}`)
+    );
     if (status !== 200) return null;
     return new Set(body.horarioIds);
   } catch (e) {
-    logger.warn('Reservas no responde, degradación elegante', { error: e.message });
+    if (e instanceof CircuitoAbiertoError) logger.debug('circuito reservas abierto, degradación elegante');
+    else logger.warn('Reservas no responde, degradación elegante', { error: e.message });
     return null;
   }
 }

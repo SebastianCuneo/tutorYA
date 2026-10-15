@@ -1,13 +1,16 @@
-const { E, db, logger } = require('../../comun');
+const { E, db, logger, CircuitoAbiertoError } = require('../../comun');
 const repo = require('./repositorio');
 const nucleo = require('./clienteNucleo');
 const simulador = require('./pagos/simulador');
 
-// Si el núcleo no responde (red/timeout) => 503: ante la duda no se reserva.
+// Si el núcleo no responde (red/timeout) o el circuito está abierto => 503: ante la duda no se reserva.
 async function llamarNucleo(fn) {
   try {
     return await fn();
   } catch (e) {
+    if (e instanceof CircuitoAbiertoError) {
+      throw E.circuitoAbierto('El núcleo no está disponible (circuito abierto); reintentá más tarde', e.retryAfterSeg);
+    }
     logger.warn('el núcleo no responde', { error: e.message });
     throw E.noDisponible('No se pudo consultar el núcleo; reintentá más tarde');
   }

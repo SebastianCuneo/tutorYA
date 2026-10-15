@@ -1,5 +1,5 @@
 const express = require('express');
-const { asyncH, E, auth, instancia, config } = require('../../comun');
+const { asyncH, E, auth, instancia, config, circuitos } = require('../../comun');
 const servicio = require('./servicio');
 
 const router = express.Router();
@@ -15,6 +15,11 @@ const VERSION = process.env.APP_VERSION || 'ut4';
 // Liveness: no toca dependencias.
 router.get('/api/reservas/salud', (req, res) =>
   res.json({ servicio: 'reservas', instancia, version: VERSION, ...config.info() }));
+
+// Estado de los circuitos de esta réplica (antes de /api/reservas/:id).
+router.get('/api/reservas/circuitos', auth.autenticar, auth.requerirRol('ADMIN'), (req, res) => {
+  res.json({ instancia, circuitos: circuitos() });
+});
 
 router.post('/api/reservas', auth.autenticar, auth.requerirRol('ESTUDIANTE'), asyncH(async (req, res) => {
   res.status(201).json(await servicio.reservarClase(req.usuario, req.body));

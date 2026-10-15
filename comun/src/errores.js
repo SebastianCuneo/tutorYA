@@ -19,6 +19,8 @@ const E = {
   conflicto: (m) => new ErrorApi(409, 'CONFLICTO', m),
   gone: (m) => new ErrorApi(410, 'GONE', m),
   noDisponible: (m) => new ErrorApi(503, 'NO_DISPONIBLE', m),
+  // Circuit Breaker abierto: el cliente puede reintentar pasados retryAfterSeg segundos.
+  circuitoAbierto: (m, retryAfterSeg) => Object.assign(new ErrorApi(503, 'CIRCUITO_ABIERTO', m), { retryAfterSeg }),
 };
 
 // Envuelve handlers async para que los errores lleguen al manejador (Express 4).
@@ -38,6 +40,7 @@ function manejadorErrores(err, req, res, next) {
     logger.error('error no controlado', { error: err.message, stack: err.stack });
     err = new ErrorApi(500, 'ERROR_INTERNO', 'Error interno del servidor');
   }
+  if (err.retryAfterSeg) res.setHeader('Retry-After', String(err.retryAfterSeg));
   res.status(err.status).json({ error: { codigo: err.codigo, mensaje: err.message } });
 }
 
