@@ -1,7 +1,8 @@
 {
   "info": {
     "name": "TutorYa",
-    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "TutorYa (ANDIS II, UCU). baseUrl en HTTPS con certificado autofirmado: la verificación SSL está desactivada en la colección (protocolProfileBehavior.strictSSL=false)."
   },
   "auth": {
     "type": "bearer",
@@ -16,7 +17,7 @@
   "variable": [
     {
       "key": "baseUrl",
-      "value": "http://localhost:8080"
+      "value": "https://localhost:8443"
     },
     {
       "key": "token",
@@ -801,6 +802,280 @@
           }
         }
       ]
+    },
+    {
+      "name": "UT4",
+      "description": "Endpoints nuevos de la UT4 (patrones). Los de admin requieren rol ADMIN: correr primero 'Login admin'.",
+      "item": [
+        {
+          "name": "Login admin (guarda {{token}})",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/usuarios/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "usuarios",
+                "login"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"admin@tutorya.uy\",\n  \"password\": \"admin123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) pm.collectionVariables.set('token', pm.response.json().token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Config: leer (External Configuration Store)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "config"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "Config: actualizar en caliente",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "config"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cache.habilitado\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Config: valor inválido (400)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "config"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"cache.catalogoTtlSeg\": -1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Config: restaurar defaults",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "config"
+              ],
+              "query": []
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"circuitBreaker.habilitado\": true,\n  \"circuitBreaker.umbral\": 5,\n  \"circuitBreaker.ventanaMs\": 10000,\n  \"circuitBreaker.esperaMs\": 15000,\n  \"http.timeoutMs\": 2000,\n  \"cache.habilitado\": true,\n  \"cache.catalogoTtlSeg\": 60,\n  \"catalogo.fuente\": \"vista\",\n  \"catalogo.refrescoSeg\": 60,\n  \"salud.timeoutChequeoMs\": 1000,\n  \"log.nivel\": \"info\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Circuitos del núcleo (Circuit Breaker)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/circuitos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "circuitos"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "Circuitos de reservas (Circuit Breaker)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservas/circuitos",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservas",
+                "circuitos"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "Métricas: caché y circuitos (Cache-Aside)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/metricas",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "metricas"
+              ],
+              "query": []
+            }
+          }
+        },
+        {
+          "name": "Readiness núcleo (Health Endpoint Monitoring)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/salud/listo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "salud",
+                "listo"
+              ],
+              "query": []
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        },
+        {
+          "name": "Readiness reservas (Health Endpoint Monitoring)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/reservas/salud/listo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "reservas",
+                "salud",
+                "listo"
+              ],
+              "query": []
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          }
+        }
+      ]
     }
-  ]
+  ],
+  "protocolProfileBehavior": {
+    "strictSSL": false
+  }
 }
