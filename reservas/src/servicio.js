@@ -1,4 +1,4 @@
-const { E, db, logger, CircuitoAbiertoError } = require('../../comun');
+const { E, db, logger, redis, CircuitoAbiertoError } = require('../../comun');
 const repo = require('./repositorio');
 const nucleo = require('./clienteNucleo');
 const simulador = require('./pagos/simulador');
@@ -63,6 +63,9 @@ async function reservarClase(estudiante, body = {}) {
     }
     const pago = await repo.insertarPago(cliente, { reservaId: reserva.id, monto, referencia: cobro.referencia });
     await cliente.query('COMMIT');
+    // Después del COMMIT: avisa al Núcleo para que invalide su caché. Reservas no borra claves ajenas.
+    // Si Redis no está, la reserva igual queda hecha (la caché vence por TTL).
+    await redis.intentar((c) => c.publish('reservas:eventos', JSON.stringify({ tipo: 'reserva.creada', docenteId })));
     return { reserva, pago };
   } catch (e) {
     // ROLLBACK ya emitido en los casos controlados; si falló otra cosa, se revierte aquí (inocuo si no hay tx).

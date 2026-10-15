@@ -1,10 +1,13 @@
 // Interfaz pública del componente Docentes.
 const servicio = require('./servicio');
 const eventos = require('../eventos');
+const { redis } = require('../../../comun');
 
 // Eventos que consume este módulo
 eventos.on('docente.registrado', servicio.alRegistrarse);
 eventos.on('docente.verificado', servicio.alVerificarse);
+// Evento entre servicios (Redis pub/sub): Reservas avisa; Docentes invalida su propia caché.
+redis.suscribir('reservas:eventos', servicio.alEventoReservas);
 
 module.exports = {
   // Interfaz: BuscarDocentes (HU3)
@@ -17,5 +20,7 @@ module.exports = {
   obtenerEstadoDocente: servicio.obtenerEstadoDocente,
   // Interfaz: ConsultarDisponibilidad
   consultarDisponibilidad: servicio.consultarDisponibilidad,
+  // Métricas de la caché del catálogo (Cache-Aside)
+  metricasCache: servicio.metricasCache,
   router: require('./rutas'),
 };

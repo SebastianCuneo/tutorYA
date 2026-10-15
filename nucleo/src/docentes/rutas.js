@@ -7,7 +7,9 @@ const estudiante = [auth.autenticar, auth.requerirRol('ESTUDIANTE')];
 const docente = [auth.autenticar, auth.requerirRol('DOCENTE')];
 
 router.get('/api/docentes', estudiante, asyncH(async (req, res) => {
-  res.json(await servicio.buscarDocentes(req.query.materia));
+  const { datos, cache } = await servicio.buscarDocentes(req.query.materia);
+  res.setHeader('X-Cache', cache);
+  res.json(datos);
 }));
 
 router.get('/api/docentes/me', docente, asyncH(async (req, res) => {

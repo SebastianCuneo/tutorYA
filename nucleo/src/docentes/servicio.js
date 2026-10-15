@@ -1,5 +1,6 @@
 const { E, getJson, logger, CircuitBreaker, CircuitoAbiertoError } = require('../../../comun');
 const repo = require('./repositorio');
+const cache = require('./cache');
 
 const RESERVAS_URL = process.env.RESERVAS_URL || 'http://reservas:3000';
 const circuitoReservas = new CircuitBreaker('reservas');
@@ -21,8 +22,13 @@ async function horariosOcupados(docenteId) {
 }
 
 // HU3: docentes APROBADOS con sus horarios futuros libres (los ocupados los informa Reservas).
+// Cache-Aside: devuelve { datos, cache } con cache = HIT | MISS | BYPASS.
 async function buscarDocentes(materia) {
   const filtro = typeof materia === 'string' && materia.trim() ? materia.trim() : null;
+  return cache.obtener(filtro, () => armarCatalogo(filtro));
+}
+
+async function armarCatalogo(filtro) {
   const docentes = await repo.listarAprobados(filtro);
   return Promise.all(
     docentes.map(async (d) => {
@@ -63,6 +69,7 @@ async function actualizarMaterias(docenteId, body = {}) {
   const limpias = [...new Set(materias.map((m) => m.trim()))];
   await obtenerPerfilCompleto(docenteId);
   await repo.reemplazarMaterias(docenteId, limpias);
+  await alCambiarCatalogo('materias');
   return { materias: limpias };
 }
 
@@ -76,7 +83,9 @@ async function agregarHorario(docenteId, body = {}) {
   if (fin <= inicio) throw E.validacion('fin debe ser posterior a inicio');
   if (typeof body.precio === 'boolean' || !Number.isFinite(precio) || precio < 0) throw E.validacion('precio inválido');
   await obtenerPerfilCompleto(docenteId);
-  return repo.insertarHorario(docenteId, { inicio: inicio.toISOString(), fin: fin.toISOString(), precio });
+  const horario = await repo.insertarHorario(docenteId, { inicio: inicio.toISOString(), fin: fin.toISOString(), precio });
+  await alCambiarCatalogo('horario');
+  return horario;
 }
 
 // Usada por Reservas (HTTP interno): ¿el docente está aprobado y el horario existe y es suyo? Devuelve el precio.
@@ -97,6 +106,18 @@ async function obtenerEstadoDocente(docenteId) {
 async function alVerificarse({ docenteId, resultado }) {
   if (!['APROBADO', 'RECHAZADO'].includes(resultado)) return;
   await repo.actualizarEstado(docenteId, resultado);
+  await alCambiarCatalogo('verificacion');
+}
+
+// Cualquier cambio del catálogo invalida la caché (no se lanza: la escritura ya se hizo).
+async function alCambiarCatalogo(motivo) {
+  await cache.invalidar(motivo);
+}
+
+// Reservas publica reserva.creada (después del COMMIT): cambian los horarios libres => invalidar.
+async function alEventoReservas(mensaje) {
+  const evento = JSON.parse(mensaje);
+  if (evento.tipo === 'reserva.creada') await cache.invalidar(`reserva.creada docente=${evento.docenteId}`);
 }
 
 async function alRegistrarse({ docenteId, nombre }) {
@@ -105,5 +126,6 @@ async function alRegistrarse({ docenteId, nombre }) {
 
 module.exports = {
   buscarDocentes, obtenerPerfilCompleto, actualizarMaterias, agregarHorario,
-  consultarDisponibilidad, obtenerEstadoDocente, alVerificarse, alRegistrarse,
+  consultarDisponibilidad, obtenerEstadoDocente, alVerificarse, alRegistrarse, alEventoReservas,
+  metricasCache: cache.metricas,
 };

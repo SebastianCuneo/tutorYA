@@ -1,5 +1,6 @@
 const express = require('express');
 const { asyncH, auth, config, circuitos, instancia } = require('../../../comun');
+const docentes = require('../docentes');
 
 // Endpoints operativos (rol ADMIN). No es un componente de negocio: no tiene esquema propio.
 const router = express.Router();
@@ -17,6 +18,11 @@ router.put('/api/admin/config', admin, asyncH(async (req, res) => {
 // Circuit Breaker: estado de los circuitos de esta réplica.
 router.get('/api/circuitos', admin, (req, res) => {
   res.json({ instancia, circuitos: circuitos() });
+});
+
+// Métricas en memoria de esta réplica: caché del catálogo y circuitos.
+router.get('/api/metricas', admin, (req, res) => {
+  res.json({ instancia, cache: docentes.metricasCache(), circuitos: circuitos() });
 });
 
 module.exports = router;
