@@ -15,6 +15,7 @@ WORKDIR /app/reservas
 ENV NODE_ENV=production
 USER node
 EXPOSE 3000
-HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=10 \
-  CMD wget -qO- http://127.0.0.1:3000/api/reservas/salud || exit 1
+# Readiness: si la base no responde (o se inyecta una falla) el contenedor queda unhealthy.
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:3000/api/reservas/salud/listo || exit 1
 CMD ["node", "src/app.js"]

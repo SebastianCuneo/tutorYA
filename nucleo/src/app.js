@@ -1,5 +1,5 @@
 const express = require('express');
-const { middlewareInstancia, instancia, rutaNoEncontrada, manejadorErrores, db, logger, config } = require('../../comun');
+const { middlewareInstancia, instancia, rutaNoEncontrada, manejadorErrores, db, logger, config, salud } = require('../../comun');
 
 // Cada require registra las suscripciones a eventos del módulo.
 const usuarios = require('./usuarios');
@@ -17,6 +17,11 @@ const VERSION = process.env.APP_VERSION || 'ut4';
 
 // Liveness: no toca dependencias.
 app.get('/api/salud', (req, res) => res.json({ servicio: 'nucleo', instancia, version: VERSION, ...config.info() }));
+// Readiness: base (crítica) y Redis (no crítico).
+app.get('/api/salud/listo', salud.rutaListo());
+// Réplica degradada => 503 en el resto de /api/* (Nginx reintenta en otra réplica).
+app.use(salud.middlewareListo(['/api/salud', '/api/salud/listo']));
+app.use(salud.routerFallas());
 
 // Un solo proceso (Núcleo) hospeda 4 componentes lógicos, cada uno con su router.
 app.use(usuarios.router);

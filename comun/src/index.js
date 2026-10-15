@@ -8,4 +8,5 @@ module.exports = {
   logger: require('./logger'),
   redis: require('./redis'),
   config: require('./config'),
+  salud: require('./salud'),
 };

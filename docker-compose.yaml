@@ -10,6 +10,8 @@ x-entorno-app: &entorno-app
   PORT: "3000"
   REDIS_URL: redis://redis:6379
   APP_VERSION: ${APP_VERSION:-ut4}
+  # Habilita /internal/fallas/* (inyección de fallas para las demos). false en producción.
+  FALLAS_HABILITADAS: ${FALLAS_HABILITADAS:-true}
 
 services:
   db:
