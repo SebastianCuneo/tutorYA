@@ -21,7 +21,7 @@ TMP=$(mktemp -d)
 BODY=$(jq -nc --argjson d "$DOC_ID" --argjson h "$H1" '{docenteId:$d,horarioId:$h,tokenPago:"tok"}')
 for quien in A B; do
   tok=TOK_$quien
-  ( curl -s -o "$TMP/$quien.body" -w '%{http_code}' -X POST "$BASE/api/reservas" \
+  ( curl -s -k -o "$TMP/$quien.body" -w '%{http_code}' -X POST "$BASE/api/reservas" \
       -H 'Content-Type: application/json' -H "Authorization: Bearer ${!tok}" -d "$BODY" > "$TMP/$quien.code" ) &
 done
 wait

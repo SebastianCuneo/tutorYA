@@ -1,5 +1,6 @@
 module.exports = {
   ...require('./instancia'),
+  ...require('./contexto'),
   ...require('./errores'),
   ...require('./http'),
   ...require('./circuitBreaker'),

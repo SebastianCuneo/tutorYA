@@ -3,9 +3,11 @@
 
 RAIZ="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$RAIZ" || exit 1
-# Si existe .env (mismo que usa docker compose) se toma GATEWAY_PORT de ahí.
+# Si existe .env (mismo que usa docker compose) se toman GATEWAY_PORT / GATEWAY_TLS_PORT de ahí.
 [ -f .env ] && { set -a; . ./.env; set +a; }
-BASE="${BASE_URL:-http://localhost:${GATEWAY_PORT:-8080}}"
+# Gateway Offloading: todo va por HTTPS (certificado autofirmado => curl -k).
+BASE="${BASE_URL:-https://localhost:${GATEWAY_TLS_PORT:-8443}}"
+BASE_HTTP="http://localhost:${GATEWAY_PORT:-8080}"
 
 # Sufijo único para poder re-ejecutar los scripts sin chocar con emails ya registrados.
 SUFIJO="$(date +%s)$RANDOM"

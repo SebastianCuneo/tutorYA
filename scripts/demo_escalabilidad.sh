@@ -14,7 +14,7 @@ repartir() { # $1 = ruta, $2 = instancias esperadas
   paso "30 GET a $1"
   local salida
   salida=$(for _ in $(seq 1 30); do
-    curl -s -o /dev/null -D - "$BASE$1" | tr -d '\r' | awk 'tolower($1)=="x-instancia:"{print $2}'
+    curl -s -k -o /dev/null -D - "$BASE$1" | tr -d '\r' | awk 'tolower($1)=="x-instancia:"{print $2}'
   done)
   echo "$salida" | sort | uniq -c | awk '{printf "   %s peticiones → instancia %s\n", $1, $2}'
   local distintas minimo

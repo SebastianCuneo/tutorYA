@@ -1,5 +1,5 @@
 const express = require('express');
-const { middlewareInstancia, instancia, rutaNoEncontrada, manejadorErrores, db, logger, config, salud } = require('../../comun');
+const { middlewareRequestId, middlewareInstancia, instancia, rutaNoEncontrada, manejadorErrores, db, logger, config, salud } = require('../../comun');
 
 // Cada require registra las suscripciones a eventos del módulo.
 const usuarios = require('./usuarios');
@@ -9,6 +9,7 @@ const verificacion = require('./verificacion');
 const admin = require('./admin/rutas');
 
 const app = express();
+app.use(middlewareRequestId);
 app.use(middlewareInstancia);
 app.use(logger.middlewareLog);
 app.use(express.json());

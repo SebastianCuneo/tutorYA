@@ -1,3 +1,6 @@
+# Plantilla: la imagen oficial de Nginx la procesa con envsubst al arrancar
+# (NGINX_ENVSUBST_OUTPUT_DIR=/etc/nginx => /etc/nginx/nginx.conf). Solo se reemplaza ${GATEWAY_TLS_PORT}
+# (NGINX_ENVSUBST_FILTER); las variables propias de Nginx ($host, $request_id...) quedan intactas.
 worker_processes 1;
 
 events { worker_connections 1024; }
@@ -8,6 +11,23 @@ http {
   resolver 127.0.0.11 valid=5s ipv6=off;
   default_type application/json;
 
+  # ---------- Gateway Offloading ----------
+  server_tokens off;
+
+  # Log de acceso en JSON, con el mismo request_id que reciben los servicios.
+  log_format json escape=json '{"ts":"$time_iso8601","request_id":"$request_id","remote_addr":"$remote_addr",'
+    '"metodo":"$request_method","uri":"$request_uri","status":$status,"bytes":$body_bytes_sent,'
+    '"upstream_addr":"$upstream_addr","upstream_status":"$upstream_status",'
+    '"request_time":$request_time,"upstream_response_time":"$upstream_response_time"}';
+  access_log /var/log/nginx/access.log json;
+
+  # Compresión de las respuestas JSON (las del catálogo pesan cientos de KB).
+  gzip on;
+  gzip_types application/json;
+  gzip_min_length 1024;
+  gzip_proxied any;
+  gzip_vary on;
+
   # ---------- Gatekeeper: límites del pedido ----------
   client_max_body_size 64k;
   client_body_buffer_size 64k;
@@ -16,8 +36,27 @@ http {
   client_header_timeout 10s;
   send_timeout 10s;
 
+  # HTTP => HTTPS. $host no trae el puerto: se usa el publicado para TLS.
   server {
     listen 80;
+    return 301 https://$host:${GATEWAY_TLS_PORT}$request_uri;
+  }
+
+  server {
+    # TLS termina en el gateway; dentro de la red interna los servicios siguen hablando HTTP.
+    listen 443 ssl;
+    ssl_certificate     /etc/nginx/certs/tutorya.crt;
+    ssl_certificate_key /etc/nginx/certs/tutorya.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:1m;
+
+    # Cabeceras de seguridad en TODAS las respuestas (también en errores: always).
+    # Se definen solo acá: las locations no usan add_header, así que las heredan.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy no-referrer always;
+    add_header X-Request-Id $request_id always;
 
     # Gatekeeper: lista blanca de métodos (TRACE, CONNECT, etc. => 405).
     if ($request_method !~ ^(GET|POST|PUT|PATCH|DELETE|OPTIONS)$) {

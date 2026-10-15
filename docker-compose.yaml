@@ -61,7 +61,7 @@ services:
     environment:
       <<: *entorno-app
       RESERVAS_URL: http://reservas:3000
-      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:${GATEWAY_PORT:-8080}}
+      PUBLIC_URL: ${PUBLIC_URL:-https://localhost:${GATEWAY_TLS_PORT:-8443}}
     depends_on:
       db:
         condition: service_healthy
@@ -86,14 +86,43 @@ services:
     deploy:
       replicas: 2
 
+  # Gateway Offloading: genera un certificado autofirmado si no existe (one-shot).
+  # Va en "borde" porque necesita salida a internet para instalar openssl.
+  certs:
+    networks: [borde]
+    image: alpine:3.20
+    volumes:
+      - ./nginx/certs:/certs
+    command:
+      - sh
+      - -c
+      - |
+        if [ -s /certs/tutorya.crt ] && [ -s /certs/tutorya.key ]; then
+          echo "certificado existente: no se regenera"
+        else
+          apk add --no-cache openssl >/dev/null &&
+          openssl req -x509 -nodes -newkey rsa:2048 -days 365 -subj "/CN=localhost/O=TutorYa" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+            -keyout /certs/tutorya.key -out /certs/tutorya.crt &&
+          chmod 600 /certs/tutorya.key && echo "certificado autofirmado generado"
+        fi
+
   nginx:
     networks: [borde, interna]
     image: nginx:1.27-alpine
     ports:
       - "${GATEWAY_PORT:-8080}:80"
+      - "${GATEWAY_TLS_PORT:-8443}:443"
+    environment:
+      GATEWAY_TLS_PORT: ${GATEWAY_TLS_PORT:-8443}
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx
+      NGINX_ENVSUBST_FILTER: ^GATEWAY_
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
     depends_on:
+      certs:
+        condition: service_completed_successfully
       nucleo:
         condition: service_healthy
       reservas:

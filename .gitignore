@@ -1,3 +1,6 @@
 node_modules/
 .env
 *.bak
+# Certificados TLS: los genera el servicio certs (docker compose)
+nginx/certs/
+scripts/salidas/

@@ -1,8 +1,9 @@
 const express = require('express');
-const { middlewareInstancia, rutaNoEncontrada, manejadorErrores, db, logger, config, salud, circuitos } = require('../../comun');
+const { middlewareRequestId, middlewareInstancia, rutaNoEncontrada, manejadorErrores, db, logger, config, salud, circuitos } = require('../../comun');
 const reservas = require('./index');
 
 const app = express();
+app.use(middlewareRequestId);
 app.use(middlewareInstancia);
 app.use(logger.middlewareLog);
 app.use(express.json());
