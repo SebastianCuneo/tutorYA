@@ -18,7 +18,7 @@ estudiante_demo
 # explicar TITULO SQL : EXPLAIN ANALYZE mostrando solo el nodo principal y el Execution Time. Deja EXP_MS.
 explicar() {
   local plan
-  plan=$(docker compose exec -T db psql -U tutorya -d tutorya -tAc "EXPLAIN ANALYZE $2")
+  plan=$(docker compose exec -T db-nucleo psql -U tutorya -d tutorya -tAc "EXPLAIN ANALYZE $2")
   EXP_MS=$(echo "$plan" | grep 'Execution Time' | awk '{print $3}')
   info "$1"
   info "   nodo principal: $(echo "$plan" | head -1 | sed -E 's/  \(cost=[^)]*\)//')"

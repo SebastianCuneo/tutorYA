@@ -2,15 +2,14 @@
 -- 300 docentes APROBADOS, cada uno con 5 materias (de una lista de 10) y 20 horarios futuros.
 -- Se insertan directo por SQL (no por la API). Idempotente: borra y recrea SOLO lo suyo
 -- (usuarios carga_*@tutorya.uy y todo lo que cuelga de ellos). Password de todos: clave123.
+-- Corre contra db-nucleo: las reservas de estos docentes viven en db-reservas y las borra
+-- scripts/cargar_datos.sh antes de ejecutar este archivo.
 \set ON_ERROR_STOP on
 BEGIN;
 
 CREATE TEMP TABLE carga_ids ON COMMIT DROP AS
   SELECT id FROM usuarios.usuarios WHERE email LIKE 'carga\_%@tutorya.uy';
 
-DELETE FROM reservas.pagos WHERE reserva_id IN
-  (SELECT id FROM reservas.reservas WHERE docente_id IN (SELECT id FROM carga_ids));
-DELETE FROM reservas.reservas WHERE docente_id IN (SELECT id FROM carga_ids);
 DELETE FROM mensajeria.mensajes WHERE conversacion_id IN
   (SELECT id FROM mensajeria.conversaciones WHERE docente_id IN (SELECT id FROM carga_ids));
 DELETE FROM mensajeria.conversaciones WHERE docente_id IN (SELECT id FROM carga_ids);

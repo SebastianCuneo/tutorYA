@@ -1,5 +1,6 @@
 -- Migración UT4 para bases creadas con el init.sql de la UT3. Idempotente: se puede correr varias veces.
---   docker compose exec -T db psql -U tutorya -d tutorya -v ON_ERROR_STOP=1 < db/migraciones/ut4.sql
+-- Solo toca esquemas del Núcleo (usuarios, docentes): se ejecuta contra db-nucleo.
+--   docker compose exec -T db-nucleo psql -U tutorya -d tutorya -v ON_ERROR_STOP=1 < db/migraciones/ut4.sql
 
 -- ---------- External Configuration Store: rol ADMIN + usuario semilla (password: admin123) ----------
 ALTER TABLE usuarios.usuarios DROP CONSTRAINT IF EXISTS usuarios_rol_check;

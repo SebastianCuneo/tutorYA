@@ -47,17 +47,17 @@ RID=$(cabecera X-Request-Id "$H")
 info "POST /api/reservas (con 'X-Request-Id: id-falsificado-por-el-cliente') → X-Request-Id: $RID"
 check "el gateway ignora el id del cliente" true "$([ -n "$RID" ] && [ "$RID" != id-falsificado-por-el-cliente ] && echo true || echo false)"
 sleep 1
-EN_NGINX=$(docker compose logs nginx 2>/dev/null | grep -c "$RID")
+EN_NGINX=$(docker compose logs nginx 2>/dev/null | grep -a -c "$RID")
 EN_RESERVAS=$(docker compose logs reservas 2>/dev/null | grep -c "$RID")
 EN_NUCLEO=$(docker compose logs nucleo 2>/dev/null | grep -c "$RID")
-docker compose logs --no-log-prefix nginx 2>/dev/null | grep "$RID" | head -1 | sed 's/^/   nginx    │ /'
+docker compose logs --no-log-prefix nginx 2>/dev/null | grep -a "$RID" | head -1 | sed 's/^/   nginx    │ /'
 docker compose logs reservas 2>/dev/null | grep "$RID" | head -1 | sed 's/^/   /'
 docker compose logs nucleo 2>/dev/null | grep "$RID" | head -2 | sed 's/^/   /'
 info "líneas con $RID → nginx: $EN_NGINX, reservas: $EN_RESERVAS, nucleo: $EN_NUCLEO"
 check "en docker compose logs nginx" true "$([ "$EN_NGINX" -ge 1 ] && echo true || echo false)"
 check "en docker compose logs reservas" true "$([ "$EN_RESERVAS" -ge 1 ] && echo true || echo false)"
 check "en docker compose logs nucleo (propagado por getJson)" true "$([ "$EN_NUCLEO" -ge 1 ] && echo true || echo false)"
-LINEA=$(docker compose logs --no-log-prefix nginx 2>/dev/null | grep "$RID" | tail -1)
+LINEA=$(docker compose logs --no-log-prefix nginx 2>/dev/null | grep -a "$RID" | tail -1)
 check "log de Nginx en JSON con request_id, status, upstream_addr y request_time" true \
   "$(echo "$LINEA" | jq -e 'has("request_id") and has("status") and has("upstream_addr") and has("request_time")' >/dev/null 2>&1 && echo true || echo false)"
 

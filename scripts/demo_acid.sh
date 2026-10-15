@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Demo 4: ACID — aislamiento (doble reserva), atomicidad (pago rechazado) y durabilidad (restart de la base).
+# Demo 4: ACID local en db-reservas — aislamiento (doble reserva), atomicidad (pago rechazado) y durabilidad (restart de db-reservas).
 source "$(dirname "$0")/lib.sh"
 
-titulo "DEMO 4 — ACID (transacciones en PostgreSQL)"
+titulo "DEMO 4 — ACID (transacciones en db-reservas)"
 
 paso "Preparación: docente aprobado con 2 horarios y 2 estudiantes mayores"
 esperar_sano 120
@@ -29,28 +29,28 @@ CA=$(cat "$TMP/A.code"); CB=$(cat "$TMP/B.code")
 info "Estudiante A → HTTP $CA  $(cat "$TMP/A.body")"
 info "Estudiante B → HTTP $CB  $(cat "$TMP/B.body")"
 check "exactamente un 201 y un 409" "201 409" "$(printf '%s\n%s\n' "$CA" "$CB" | sort | tr '\n' ' ' | sed 's/ $//')"
-check "una sola fila para el horario en la base" 1 "$(psql_escalar "SELECT count(*) FROM reservas.reservas WHERE horario_id=$H1")"
+check "una sola fila para el horario en la base" 1 "$(psql_reservas "SELECT count(*) FROM reservas.reservas WHERE horario_id=$H1")"
 GANADOR=$( [ "$CA" = 201 ] && cat "$TMP/A.body" || cat "$TMP/B.body" )
 RES_ID=$(echo "$GANADOR" | jq -r '.reserva.id')
 TOK_GANADOR=$( [ "$CA" = 201 ] && echo "$TOK_A" || echo "$TOK_B" )
 rm -rf "$TMP"
 
 paso "ATOMICIDAD: pago rechazado sobre el horario $H2 no deja ninguna fila"
-RES_ANTES=$(psql_escalar "SELECT count(*) FROM reservas.reservas")
-PAG_ANTES=$(psql_escalar "SELECT count(*) FROM reservas.pagos")
+RES_ANTES=$(psql_reservas "SELECT count(*) FROM reservas.reservas")
+PAG_ANTES=$(psql_reservas "SELECT count(*) FROM reservas.pagos")
 info "Antes: reservas=$RES_ANTES pagos=$PAG_ANTES"
 req POST /api/reservas "$(jq -nc --argjson d "$DOC_ID" --argjson h "$H2" '{docenteId:$d,horarioId:$h,tokenPago:"RECHAZAR"}')" "$TOK_A"
 check "pago rechazado" 402 "$CODIGO"
-RES_DESPUES=$(psql_escalar "SELECT count(*) FROM reservas.reservas")
-PAG_DESPUES=$(psql_escalar "SELECT count(*) FROM reservas.pagos")
+RES_DESPUES=$(psql_reservas "SELECT count(*) FROM reservas.reservas")
+PAG_DESPUES=$(psql_reservas "SELECT count(*) FROM reservas.pagos")
 info "Después: reservas=$RES_DESPUES pagos=$PAG_DESPUES"
 check "reservas sin cambios" "$RES_ANTES" "$RES_DESPUES"
 check "pagos sin cambios" "$PAG_ANTES" "$PAG_DESPUES"
 req POST /api/reservas "$(jq -nc --argjson d "$DOC_ID" --argjson h "$H2" '{docenteId:$d,horarioId:$h,tokenPago:"tok"}')" "$TOK_B"
 check "el horario quedó libre: se puede reservar luego" 201 "$CODIGO"
 
-paso "DURABILIDAD: docker compose restart db y la reserva confirmada sigue existiendo"
-docker compose restart db 2>&1 | tail -2
+paso "DURABILIDAD: docker compose restart db-reservas y la reserva confirmada sigue existiendo"
+docker compose restart db-reservas 2>&1 | tail -2
 esperar_sano 120
 CODIGO=000
 for _ in $(seq 1 10); do

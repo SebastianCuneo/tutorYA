@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Despliegue de TutorYa en Azure: una VM Ubuntu 22.04 que corre Docker Engine, y dentro los contenedores.
+# - La VM es la frontera de aislamiento fuerte (kernel propio) y de red (Network Security Group).
+# - Docker aporta escalado en segundos y un despliegue reproducible (el mismo docker-compose.yaml que en local).
+# Requiere az CLI autenticado (az login). Se ejecuta desde la raíz del repo:
+#   bash scripts/desplegar_azure.azcli
+# Variables sobreescribibles por entorno: RG=otro-rg LOC=brazilsouth bash scripts/desplegar_azure.azcli
+set -euo pipefail
+
+RG="${RG:-tutorya-rg}"
+LOC="${LOC:-eastus}"
+VM="${VM:-tutorya-vm}"
+
+cd "$(dirname "$0")/.."
+
+# 1. Grupo de recursos: agrupa la VM, su disco, IP pública y NSG (se borra todo junto al final).
+echo "▶ 1. Grupo de recursos $RG en $LOC"
+az group create -n "$RG" -l "$LOC" -o none
+
+# 2. VM: cloud-init instala Docker, clona la rama ut4-patrones y hace docker compose up.
+#    Standard_B2s alcanza para la carga de referencia (1.000 estudiantes, pico de 5 coordinaciones).
+echo "▶ 2. VM $VM (Ubuntu 22.04, Standard_B2s) con cloud-init"
+az vm create -g "$RG" -n "$VM" \
+  --image Ubuntu2204 --size Standard_B2s \
+  --admin-username tutorya --generate-ssh-keys \
+  --custom-data scripts/cloud-init.yaml \
+  -o none
+
+# 3. NSG: desde Internet solo se abre el 8443 (HTTPS del gateway). Bases, Redis y servicios no.
+echo "▶ 3. NSG: abrir solo el puerto 8443"
+az vm open-port -g "$RG" -n "$VM" --port 8443 --priority 1010 -o none
+
+# 4. NSG: la regla SSH que crea az vm create queda restringida a nuestra IP pública.
+MI_IP=$(curl -s https://api.ipify.org)
+echo "▶ 4. NSG: SSH (22) solo desde $MI_IP"
+az network nsg rule update -g "$RG" --nsg-name "${VM}NSG" -n default-allow-ssh \
+  --source-address-prefixes "$MI_IP" -o none
+
+# 5. Esperar a que cloud-init termine y el gateway responda la readiness por HTTPS.
+IP=$(az vm show -d -g "$RG" -n "$VM" --query publicIps -o tsv)
+echo "▶ 5. Esperando https://$IP:8443/api/salud/listo (cloud-init + build tardan varios minutos)"
+RESPUESTA=$(mktemp)
+for intento in $(seq 1 60); do
+  CODIGO=$(curl -sk -m 5 -o "$RESPUESTA" -w '%{http_code}' "https://$IP:8443/api/salud/listo" || true)
+  if [ "$CODIGO" = 200 ]; then
+    echo "   OK al intento $intento:"
+    cat "$RESPUESTA"; echo
+    rm -f "$RESPUESTA"
+    echo "TutorYa disponible en https://$IP:8443 (certificado autofirmado: curl -k)"
+    exit 0
+  fi
+  echo "   intento $intento/60: HTTP ${CODIGO:-000}, reintento en 10 s"
+  sleep 10
+done
+rm -f "$RESPUESTA"
+echo "La VM no respondió a tiempo. Revisar con: ssh tutorya@$IP 'cloud-init status --long'" >&2
+exit 1
+
+# 6. Limpieza (borra la VM y todos sus recursos):
+#   az group delete -n $RG --yes --no-wait

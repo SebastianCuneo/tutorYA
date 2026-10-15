@@ -1,7 +1,8 @@
 # TutorYa — API REST (TFU UT3 + UT4, ANDIS II, UCU)
 
 Plataforma que conecta estudiantes con docentes particulares. Implementación de la arquitectura
-del grupo: 5 componentes lógicos, 2 servicios desplegables, gateway Nginx y PostgreSQL 16.
+del grupo: 5 componentes lógicos, 2 servicios desplegables, gateway Nginx y una base PostgreSQL 16
+por servicio (`db-nucleo` y `db-reservas`).
 
 ## Requisitos
 
@@ -10,7 +11,7 @@ Docker con Compose v2, y para los scripts de demo: `bash`, `curl` (>= 7.84), `jq
 ## Cómo levantar
 
 ```bash
-docker compose up -d --build     # certs (one-shot), redis, db, 2 réplicas de nucleo, 2 de reservas y nginx
+docker compose up -d --build     # certs (one-shot), redis, db-nucleo, db-reservas, 2 réplicas de nucleo, 2 de reservas y nginx
 curl -k https://localhost:8443/api/salud
 ```
 
@@ -18,27 +19,45 @@ El gateway publica `8443` (HTTPS) y `8080` (HTTP, redirige a HTTPS). Si están o
 `.env.example` a `.env` y cambiá `GATEWAY_TLS_PORT` / `GATEWAY_PORT` (los scripts los leen de ahí).
 El certificado es autofirmado (lo genera el servicio `certs` en `nginx/certs/`, que no se commitea):
 usá `curl -k` y, en Postman, la colección ya trae la verificación SSL desactivada.
-Para borrar todo, incluidas la base y Redis: `docker compose down -v`.
+Para borrar todo, incluidas las bases y Redis: `docker compose down -v`.
 
-**Base creada con la UT3** (volumen `pgdata` previo): `init.sql` solo corre en una base vacía. Para
-agregar el rol ADMIN y la vista materializada sin perder datos (idempotente):
+**Entorno levantado con la UT3**: el volumen `pgdata` de la base única ya no se usa. Lo más simple es
+`docker compose down -v` y volver a levantar: `db/init_nucleo.sql` y `db/init_reservas.sql` corren
+solos en volúmenes vacíos. Para una base del Núcleo ya creada con el init de la UT3, la migración agrega el
+rol ADMIN y la vista materializada sin perder datos (idempotente):
 
 ```bash
-docker compose exec -T db psql -U tutorya -d tutorya -v ON_ERROR_STOP=1 < db/migraciones/ut4.sql
+docker compose exec -T db-nucleo psql -U tutorya -d tutorya -v ON_ERROR_STOP=1 < db/migraciones/ut4.sql
 ```
+
+| Servicio del compose | Red | Puertos publicados | Rol |
+|---|---|---|---|
+| `nginx` | borde + interna | 8443 (HTTPS), 8080 (→ HTTPS) | Gatekeeper y Gateway Offloading, único acceso |
+| `certs` | borde | — | One-shot: certificado autofirmado |
+| `nucleo` ×2 | interna | — | Usuarios, Docentes, Mensajería, Verificación |
+| `reservas` ×2 | interna | — | Reservas y pagos |
+| `db-nucleo` | interna | — | PostgreSQL: usuarios, docentes (+ vista `docentes.catalogo`), mensajeria, verificacion |
+| `db-reservas` | interna | — | PostgreSQL: reservas (`reservas`, `pagos`) |
+| `redis` | interna | — | Caché, configuración externa y canales de eventos |
 
 ## Arquitectura
 
 ```
                  red "borde"            │ red "interna" (internal: true, sin puertos publicados)
 cliente ─HTTPS─▶ nginx :443 (TLS) ──────┼─┬─ /api/reservas → reservas ×N ──HTTP+circuito──▶ nucleo /internal/...
-        ─HTTP──▶ nginx :80 → 301 HTTPS  │ └─ /api/*        → nucleo ×N  ──HTTP+circuito──▶ reservas /internal/...
-                                        │        │  │
-                                        │        │  └── Redis: config:tutorya (config), catalogo:* (caché),
-                                        │        │      canales config:cambios y reservas:eventos
-                                        │        └───── PostgreSQL (esquemas usuarios, docentes, mensajeria,
-                                        │               verificacion, reservas; vista docentes.catalogo)
+        ─HTTP──▶ nginx :80 → 301 HTTPS  │ │                     └──── db-reservas (esquema reservas: reservas, pagos)
+                                        │ └─ /api/*        → nucleo ×N  ──HTTP+circuito──▶ reservas /internal/...
+                                        │                     │  │
+                                        │                     │  └── db-nucleo (esquemas usuarios, docentes, mensajeria,
+                                        │                     │      verificacion; vista docentes.catalogo)
+                                        │                     └───── Redis: config:tutorya (config), catalogo:* (caché),
+                                        │                            canales config:cambios y reservas:eventos
 ```
+
+Cada servicio tiene su propia base (Bulkhead de datos): si cae `db-nucleo`, Reservas sigue listando y
+confirmando clases. Consistencia según el dato: **ACID local en `db-reservas`** (reserva + pago en una
+transacción, `UNIQUE(horario_id)` impide la doble reserva) y **BASE en el catálogo** (caché y vista
+materializada, ≤ 60 s de atraso, invalidados por el evento `reserva.creada`).
 
 | Carpeta | Componente del UML |
 |---|---|
@@ -51,8 +70,10 @@ cliente ─HTTPS─▶ nginx :443 (TLS) ──────┼─┬─ /api/rese
 | `comun/` | Biblioteca compartida: JWT + rol, errores JSON, logger, `X-Instancia`, pool de PostgreSQL, y en la UT4: config, Redis, circuit breaker, salud y `X-Request-Id` |
 | `nucleo/src/admin/` | Endpoints operativos (rol ADMIN): config, circuitos, métricas |
 | `config/default.json` | Valores por defecto de la config externa |
-| `db/init.sql` | Esquemas, vista materializada y seed |
-| `db/migraciones/ut4.sql` | Migración UT4 para bases ya creadas |
+| `db/init_nucleo.sql` | Base del Núcleo: esquemas, vista materializada y seed |
+| `db/init_reservas.sql` | Base de Reservas: esquema reservas |
+| `db/migraciones/ut4.sql` | Migración UT4 para bases del Núcleo ya creadas |
+| `scripts/desplegar_azure.azcli`, `scripts/cloud-init.yaml` | Despliegue en una VM de Azure |
 | `nginx/templates/nginx.conf.template` | Gateway (plantilla procesada con envsubst) |
 
 Cada módulo tiene `index.js` (interfaz pública, comentada con `// Interfaz: <Nombre> (HUx)`),
@@ -128,8 +149,9 @@ Todas las demos (UT3 y UT4) van por HTTPS: `BASE=https://localhost:${GATEWAY_TLS
 
 ## UT4 — Patrones
 
-Siete patrones sobre la misma arquitectura de la UT3. La única infraestructura nueva es un
-contenedor `redis:7-alpine`, que se usa como caché y como almacén de configuración.
+Siete patrones sobre la misma arquitectura de la UT3. La infraestructura nueva es un contenedor
+`redis:7-alpine` (caché, almacén de configuración y canales de eventos) y la segunda base de datos:
+`db-nucleo` y `db-reservas` reemplazan a la base única de la UT3.
 
 ### Patrones → archivos
 
@@ -139,7 +161,7 @@ contenedor `redis:7-alpine`, que se usa como caché y como almacén de configura
 | Disponibilidad | **Circuit Breaker** | `comun/src/circuitBreaker.js`, `reservas/src/clienteNucleo.js`, `reservas/src/servicio.js`, `nucleo/src/docentes/servicio.js` |
 | Disponibilidad | **Health Endpoint Monitoring** | `comun/src/salud.js`, `nucleo/src/app.js`, `reservas/src/app.js`, `*/Dockerfile` (HEALTHCHECK), Nginx (`proxy_next_upstream`) |
 | Rendimiento | **Cache-Aside** | `nucleo/src/docentes/cache.js`, `nucleo/src/docentes/servicio.js` y `rutas.js` (`X-Cache`), `reservas/src/servicio.js` (evento `reserva.creada`) |
-| Rendimiento | **Materialized View** | `db/init.sql`, `db/migraciones/ut4.sql`, `nucleo/src/docentes/repositorio.js` (`buscarEnCatalogo`, `refrescarCatalogo`), `reservas/src/rutas.js` (`?docenteIds=`) |
+| Rendimiento | **Materialized View** | `db/init_nucleo.sql`, `db/migraciones/ut4.sql`, `nucleo/src/docentes/repositorio.js` (`buscarEnCatalogo`, `refrescarCatalogo`), `reservas/src/rutas.js` (`?docenteIds=`) |
 | Seguridad | **Gatekeeper** | `docker-compose.yaml` (redes `borde`/`interna`), `nginx/templates/nginx.conf.template` |
 | Seguridad | **Gateway Offloading** | `nginx/templates/nginx.conf.template` (TLS, cabeceras, gzip, log JSON), servicio `certs`, `comun/src/contexto.js` (`X-Request-Id`) |
 
@@ -174,7 +196,7 @@ final deja todo como estaba (config por defecto, contenedores reanudados, répli
 ```bash
 ./scripts/demo_config.sh                # PUT de config y propagación a todas las réplicas sin reiniciar
 ./scripts/demo_circuit_breaker.sh       # núcleo congelado: timeout sin circuito vs 503 inmediato con circuito
-./scripts/demo_health.sh                # réplica degradada fuera de rotación; base congelada => readiness 503
+./scripts/demo_health.sh                # réplica degradada fuera de rotación; db-nucleo congelada => readiness 503 y Reservas sigue lista
 ./scripts/demo_cache.sh                 # p50/p95 sin y con caché, tasa de aciertos, invalidación
 ./scripts/demo_materialized_view.sh     # EXPLAIN ANALYZE y p50/p95 tablas vs vista, frescura al aprobar
 ./scripts/demo_gatekeeper.sh            # solo Nginx expone puertos; 404/405/413 en JSON
@@ -206,6 +228,8 @@ final deja todo como estaba (config por defecto, contenedores reanudados, répli
   vive en el Núcleo.
 
 **Health Endpoint Monitoring**
+- Cada servicio chequea solo su propia base (`db-nucleo` o `db-reservas`). Con `db-nucleo` caída el
+  Núcleo se reporta DEGRADADO y Reservas sigue lista: la demo lo verifica (Bulkhead de datos).
 - El endpoint de readiness siempre evalúa en el momento. El middleware que bloquea `/api/*`
   reutiliza la última evaluación durante 2 s. Nunca hay más de una evaluación en curso por réplica,
   y un chequeo colgado (base congelada) no se vuelve a disparar hasta que termina, así que no agota el pool.
@@ -261,3 +285,23 @@ final deja todo como estaba (config por defecto, contenedores reanudados, répli
   el cliente manda uno, Nginx lo reemplaza por `$request_id`.
 - El demo prueba las versiones de TLS con `curlimages/curl` en la red `borde`: el `curl` de macOS
   (SecureTransport) no permite elegir TLS 1.3.
+
+## Despliegue en Azure (VM + contenedores)
+
+Contenedores y VM no son alternativas: en la nube los contenedores corren dentro de una VM.
+Capas: **Azure VM (Ubuntu 22.04)** → **Docker Engine** → **contenedores** (los mismos del compose).
+La VM da el aislamiento fuerte (kernel propio) y la frontera de red (NSG); Docker da el escalado
+(`--scale`) y un despliegue reproducible.
+
+```bash
+az login
+bash scripts/desplegar_azure.azcli          # RG, LOC y VM se pueden sobreescribir por entorno
+az group delete -n tutorya-rg --yes --no-wait   # al terminar: borra la VM y todos sus recursos
+```
+
+`desplegar_azure.azcli` crea el grupo de recursos y una VM `Standard_B2s`, abre solo el `8443` en el
+NSG, restringe el SSH a la IP pública de quien lo ejecuta y espera a que
+`https://<ip>:8443/api/salud/listo` responda 200. La VM se configura con `scripts/cloud-init.yaml`:
+instala Docker Engine y el plugin compose (repositorio oficial), clona la rama `ut4-patrones`, genera
+un `.env` con `JWT_SECRET` y `POSTGRES_PASSWORD` aleatorios y `FALLAS_HABILITADAS=false`, y corre
+`docker compose up -d --build`.

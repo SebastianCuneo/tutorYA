@@ -19,7 +19,9 @@ docker compose ps --format json | jq -s -r 'flatten[] | "\(.Service)\t\([.Publis
 check "servicios con puertos publicados" nginx "$PUBLICAN"
 
 paso "2. Desde el host, los puertos de los servicios no llegan a TutorYa"
+declare -A SERVICIOS_PUERTO=([3000]="nucleo, reservas" [5432]="db-nucleo, db-reservas" [6379]="redis")
 for puerto in 3000 5432 6379; do
+  info "puerto $puerto (${SERVICIOS_PUERTO[$puerto]})"
   CUERPO=$(curl -s -m 3 "http://localhost:$puerto/api/salud" 2>/dev/null); rc=$?
   PROPIOS=$(docker ps --filter "publish=$puerto" --filter "label=com.docker.compose.project=tutorya" --format '{{.Names}}')
   AJENOS=$(docker ps --filter "publish=$puerto" --format '{{.Names}}' | grep -v '^tutorya-' | tr '\n' ' ')

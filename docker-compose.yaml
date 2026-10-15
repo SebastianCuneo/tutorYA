@@ -1,7 +1,6 @@
 name: tutorya
 
 x-entorno-app: &entorno-app
-  DB_HOST: db
   DB_PORT: "5432"
   DB_USER: tutorya
   DB_PASSWORD: ${POSTGRES_PASSWORD:-tutorya}
@@ -14,14 +13,16 @@ x-entorno-app: &entorno-app
   FALLAS_HABILITADAS: ${FALLAS_HABILITADAS:-true}
 
 # Gatekeeper: dos redes. "borde" (la única con puertos publicados, solo Nginx) e "interna"
-# (internal: true, sin salida al exterior) para servicios, base y Redis.
+# (internal: true, sin salida al exterior) para servicios, bases y Redis.
 networks:
   borde:
   interna:
     internal: true
 
 services:
-  db:
+  # Bulkhead de datos: una base por servicio, cada una con su volumen. Si cae db-nucleo,
+  # Reservas sigue atendiendo con db-reservas (y al revés).
+  db-nucleo:
     networks: [interna]
     image: postgres:16-alpine
     environment:
@@ -29,8 +30,24 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tutorya}
       POSTGRES_DB: tutorya
     volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - pgdata-nucleo:/var/lib/postgresql/data
+      - ./db/init_nucleo.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tutorya -d tutorya"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  db-reservas:
+    networks: [interna]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: tutorya
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tutorya}
+      POSTGRES_DB: tutorya
+    volumes:
+      - pgdata-reservas:/var/lib/postgresql/data
+      - ./db/init_reservas.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U tutorya -d tutorya"]
       interval: 3s
@@ -60,10 +77,11 @@ services:
       dockerfile: nucleo/Dockerfile
     environment:
       <<: *entorno-app
+      DB_HOST: db-nucleo
       RESERVAS_URL: http://reservas:3000
       PUBLIC_URL: ${PUBLIC_URL:-https://localhost:${GATEWAY_TLS_PORT:-8443}}
     depends_on:
-      db:
+      db-nucleo:
         condition: service_healthy
       redis:
         condition: service_started
@@ -77,9 +95,10 @@ services:
       dockerfile: reservas/Dockerfile
     environment:
       <<: *entorno-app
+      DB_HOST: db-reservas
       NUCLEO_URL: http://nucleo:3000
     depends_on:
-      db:
+      db-reservas:
         condition: service_healthy
       redis:
         condition: service_started
@@ -129,5 +148,6 @@ services:
         condition: service_healthy
 
 volumes:
-  pgdata:
+  pgdata-nucleo:
+  pgdata-reservas:
   redisdata:

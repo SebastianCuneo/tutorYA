@@ -1,11 +1,11 @@
--- TutorYa: un esquema por componente. Las referencias entre esquemas son ids sueltos
--- (sin foreign key cruzada) a propósito: cada componente es dueño de sus datos.
+-- TutorYa — base del servicio Núcleo (db-nucleo): un esquema por componente. Las referencias
+-- entre esquemas son ids sueltos (sin foreign key cruzada) a propósito: cada componente es dueño de
+-- sus datos. El esquema reservas vive en otra base (db-reservas, init_reservas.sql).
 
 CREATE SCHEMA usuarios;
 CREATE SCHEMA docentes;
 CREATE SCHEMA mensajeria;
 CREATE SCHEMA verificacion;
-CREATE SCHEMA reservas;
 
 -- ---------- Usuarios ----------
 CREATE TABLE usuarios.usuarios (
@@ -73,27 +73,6 @@ CREATE TABLE verificacion.solicitudes (
   llamada_en     timestamptz,
   verificador_id integer,
   resuelta_en    timestamptz
-);
-
--- ---------- Reservas ----------
-CREATE TABLE reservas.reservas (
-  id            serial PRIMARY KEY,
-  estudiante_id integer NOT NULL,
-  docente_id    integer NOT NULL,
-  horario_id    integer NOT NULL,
-  estado        text NOT NULL CHECK (estado IN ('CONFIRMADA','DICTADA')),
-  monto         numeric(10,2) NOT NULL,
-  creada_en     timestamptz NOT NULL DEFAULT now(),
-  -- Impide la doble reserva del mismo horario, incluso con requests concurrentes.
-  CONSTRAINT reservas_horario_unico UNIQUE (horario_id)
-);
-
-CREATE TABLE reservas.pagos (
-  id         serial PRIMARY KEY,
-  reserva_id integer NOT NULL UNIQUE REFERENCES reservas.reservas(id),
-  monto      numeric(10,2) NOT NULL,
-  referencia text NOT NULL,
-  pagado_en  timestamptz NOT NULL DEFAULT now()
 );
 
 -- ---------- UT4 Materialized View: catálogo de docentes APROBADOS precalculado ----------

@@ -117,10 +117,12 @@ esperar_sano() {
   return 1
 }
 
-# psql_escalar SQL : ejecuta una consulta que devuelve un valor
-psql_escalar() {
-  docker compose exec -T db psql -U tutorya -d tutorya -tAc "$1" | tr -d '[:space:]'
+# psql_en SERVICIO SQL : consulta que devuelve un valor, en la base de un servicio (db-nucleo | db-reservas)
+psql_en() {
+  docker compose exec -T "$1" psql -U tutorya -d tutorya -tAc "$2" | tr -d '[:space:]'
 }
+psql_nucleo()   { psql_en db-nucleo "$1"; }
+psql_reservas() { psql_en db-reservas "$1"; }
 
 # ---------------------------------------------------------------- UT4
 
