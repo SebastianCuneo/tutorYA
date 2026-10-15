@@ -13,8 +13,16 @@ x-entorno-app: &entorno-app
   # Habilita /internal/fallas/* (inyección de fallas para las demos). false en producción.
   FALLAS_HABILITADAS: ${FALLAS_HABILITADAS:-true}
 
+# Gatekeeper: dos redes. "borde" (la única con puertos publicados, solo Nginx) e "interna"
+# (internal: true, sin salida al exterior) para servicios, base y Redis.
+networks:
+  borde:
+  interna:
+    internal: true
+
 services:
   db:
+    networks: [interna]
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: tutorya
@@ -31,6 +39,7 @@ services:
 
   # Caché (Cache-Aside) y almacén de configuración (External Configuration Store).
   redis:
+    networks: [interna]
     image: redis:7-alpine
     # AOF: la config sobrevive a un reinicio de Redis (la caché se pierde, no importa).
     command: ["redis-server", "--appendonly", "yes"]
@@ -43,7 +52,9 @@ services:
       retries: 20
 
   # Sin container_name, sin volúmenes y sin puertos publicados: permite --scale.
+  # Gatekeeper: los servicios solo están en la red interna; el único acceso es Nginx.
   nucleo:
+    networks: [interna]
     build:
       context: .
       dockerfile: nucleo/Dockerfile
@@ -60,6 +71,7 @@ services:
       replicas: 2
 
   reservas:
+    networks: [interna]
     build:
       context: .
       dockerfile: reservas/Dockerfile
@@ -75,6 +87,7 @@ services:
       replicas: 2
 
   nginx:
+    networks: [borde, interna]
     image: nginx:1.27-alpine
     ports:
       - "${GATEWAY_PORT:-8080}:80"
