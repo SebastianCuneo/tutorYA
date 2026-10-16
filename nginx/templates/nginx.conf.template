@@ -82,10 +82,13 @@ http {
     location @e502 { return 502 '{"error":{"codigo":"SERVICIO_NO_DISPONIBLE","mensaje":"El servicio no respondió"}}'; }
 
     # Cabeceras hacia los servicios: se reemplazan las que mande el cliente (no se reenvían
-    # X-Instancia, X-Forwarded-For ni X-Request-Id falsificados).
+    # X-Instancia, X-Forwarded-* ni X-Request-Id falsificados).
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Host "";
+    proxy_set_header X-Forwarded-Port "";
     proxy_set_header X-Request-Id $request_id;
     proxy_set_header X-Instancia "";
     proxy_pass_header X-Instancia;
