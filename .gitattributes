@@ -1,2 +1,4 @@
 # Los scripts de demo se ejecutan con bash (también en Git Bash de Windows): siempre LF.
 *.sh text eol=lf
+# Scripts de PowerShell: con BOM UTF-8 (Windows PowerShell 5.1 lo necesita para leer los acentos).
+*.ps1 text eol=crlf
