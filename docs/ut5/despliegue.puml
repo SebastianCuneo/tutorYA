@@ -6,26 +6,26 @@ skinparam defaultFontSize 12
 skinparam backgroundColor white
 
 actor Cliente
-node "Azure VM (Ubuntu 22.04)\nNSG: solo 8443" as VM {
-  node "Docker Engine" as DE {
-    node "red borde" {
-      component "nginx\nGatekeeper + Offloading" as NG
+node "Azure VM (Ubuntu 22.04)\nNSG: solo 8443" <<device>> as VM {
+  node "Docker Engine" <<executionEnvironment>> as DE {
+    rectangle "red borde" {
+      node "nginx\nGatekeeper + Offloading" <<container>> as NG
     }
-    node "red interna (sin salida a internet)" {
-      node "usuarios" as cu
-      node "docentes ×2" as cd
-      node "mensajeria" as cm
-      node "verificacion" as cv
-      node "reservas ×2" as cr
-      node "pagos" as cp
-      database "db-usuarios" as du
-      database "db-docentes" as dd
-      database "db-mensajeria" as dm
-      database "db-verificacion" as dv
-      database "db-reservas" as dr
-      database "db-pagos" as dp
-      queue "rabbitmq" as mq
-      database "redis\n(caché + config)" as rd
+    rectangle "red interna (sin salida a internet)" {
+      node "usuarios" <<container>> as cu
+      node "docentes ×2" <<container>> as cd
+      node "mensajeria" <<container>> as cm
+      node "verificacion" <<container>> as cv
+      node "reservas ×2" <<container>> as cr
+      node "pagos" <<container>> as cp
+      database "db-usuarios" <<container>> as du
+      database "db-docentes" <<container>> as dd
+      database "db-mensajeria" <<container>> as dm
+      database "db-verificacion" <<container>> as dv
+      database "db-reservas" <<container>> as dr
+      database "db-pagos" <<container>> as dp
+      queue "rabbitmq" <<container>> as mq
+      database "redis\n(caché + config)" <<container>> as rd
     }
   }
 }
