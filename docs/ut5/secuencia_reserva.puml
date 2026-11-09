@@ -33,7 +33,7 @@ else pago rechazado
 else sin respuesta (timeout)
   Reservas --> Estudiante : 202 PENDIENTE
   ... cada 5 s ...
-  Reservas -> Pagos : GET /internal/pagos/{id} (reconciliador)
+  Reservas -> Pagos : reconciliador: consulta el pago\n(sin registro a los 30 s: lo anula)
   Reservas -> DB : CONFIRMADA o CANCELADA
 end
 Reservas -> RabbitMQ : relay publica el evento
