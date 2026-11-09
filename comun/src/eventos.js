@@ -27,8 +27,21 @@ const suscripciones = []; // { cola, claves, handler }
 
 const conectado = () => !!canalPub;
 
-async function prepararSuscripcion({ cola, claves, handler }) {
-  const ch = await conexion.createChannel();
+// Si un canal se cierra solo (error de canal, p. ej. un ack inválido) la conexión sigue viva y nadie
+// lo rearmaba: el consumidor quedaba mudo o el relay publicaba en un canal cerrado para siempre.
+// Se cierra la conexión entera: su 'close' dispara la reconexión, que rearma canales y suscripciones.
+function vigilarCanal(con, ch, nombre) {
+  ch.on('error', (e) => logger.warn('rabbitmq: error de canal', { canal: nombre, error: e.message }));
+  ch.on('close', () => {
+    if (conexion !== con) return; // conexión vieja o ya cerrándose: lo maneja su propio 'close'
+    logger.warn('rabbitmq: canal cerrado; se reinicia la conexión', { canal: nombre });
+    con.close().catch(() => {});
+  });
+}
+
+async function prepararSuscripcion({ cola, claves, handler }, con = conexion) {
+  const ch = await con.createChannel();
+  vigilarCanal(con, ch, cola);
   await ch.assertExchange(EXCHANGE, 'topic', { durable: true });
   await ch.assertQueue(cola, { durable: true });
   for (const clave of claves) await ch.bindQueue(cola, EXCHANGE, clave);
@@ -66,22 +79,34 @@ async function conectar() {
   if (conectando) return conectando;
   conectando = (async () => {
     for (let i = 1; ; i++) {
+      let con = null;
       try {
-        conexion = await amqp.connect(URL);
-        conexion.on('error', (e) => logger.warn('rabbitmq: error de conexión', { error: e.message }));
-        conexion.on('close', () => {
+        con = await amqp.connect(URL);
+        con.on('error', (e) => logger.warn('rabbitmq: error de conexión', { error: e.message }));
+        con.on('close', () => {
+          // Solo la conexión vigente reconecta: el 'close' tardío de una conexión descartada
+          // no debe anular la nueva.
+          if (conexion !== con) return;
           logger.warn('rabbitmq: conexión cerrada; reconectando');
           conexion = null;
           canalPub = null;
           setTimeout(conectar, 1000);
         });
-        const ch = await conexion.createConfirmChannel();
+        conexion = con;
+        const ch = await con.createConfirmChannel();
+        vigilarCanal(con, ch, 'publicacion');
         await ch.assertExchange(EXCHANGE, 'topic', { durable: true });
-        canalPub = ch;
-        for (const s of suscripciones) await prepararSuscripcion(s);
+        for (const s of suscripciones) await prepararSuscripcion(s, con);
+        canalPub = ch; // "conectado" recién cuando publicación y suscripciones están listas
         logger.info('rabbitmq conectado');
         return;
       } catch (e) {
+        // Falló a mitad de camino: se descarta esta conexión (antes quedaba abierta y huérfana).
+        if (conexion === con) {
+          conexion = null;
+          canalPub = null;
+        }
+        if (con) con.close().catch(() => {});
         const espera = Math.min(500 * i, 5000);
         if (i === 1 || i % 10 === 0) logger.warn('rabbitmq no disponible; reintento', { intento: i, error: e.message });
         await new Promise((r) => setTimeout(r, espera));
@@ -100,7 +125,8 @@ async function guardar(cliente, tipo, datos) {
 
 // Publica los eventos pendientes. FOR UPDATE SKIP LOCKED: si hay varias réplicas, no publican lo mismo.
 async function publicarPendientes() {
-  if (!conectado()) return 0;
+  const canal = canalPub; // referencia local: un 'close' en medio de la vuelta anula canalPub
+  if (!canal) return 0;
   const cliente = await db.pool.connect();
   try {
     await cliente.query('BEGIN');
@@ -110,7 +136,7 @@ async function publicarPendientes() {
     );
     for (const ev of rows) {
       const cuerpo = { id: `${ORIGEN}-${ev.id}`, tipo: ev.tipo, origen: ORIGEN, ocurridoEn: ev.creado_en, datos: ev.datos };
-      canalPub.publish(EXCHANGE, ev.tipo, Buffer.from(JSON.stringify(cuerpo)), {
+      canal.publish(EXCHANGE, ev.tipo, Buffer.from(JSON.stringify(cuerpo)), {
         persistent: true,
         contentType: 'application/json',
         messageId: cuerpo.id,
@@ -118,7 +144,7 @@ async function publicarPendientes() {
       });
     }
     if (rows.length) {
-      await canalPub.waitForConfirms(); // el broker ya lo guardó: recién ahora se marca
+      await canal.waitForConfirms(); // el broker ya lo guardó: recién ahora se marca
       await cliente.query(`UPDATE ${TABLA} SET publicado_en = now() WHERE id = ANY($1::bigint[])`, [rows.map((r) => r.id)]);
       logger.info('eventos publicados', { cantidad: rows.length, tipos: [...new Set(rows.map((r) => r.tipo))] });
     }
