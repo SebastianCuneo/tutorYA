@@ -1,7 +1,9 @@
 @startuml secuencia_reserva
+skinparam monochrome true
 skinparam shadowing false
+skinparam defaultFontName Arial
 skinparam defaultFontSize 12
-title Reservar clase (HU5/HU6) — Saga orquestada por Reservas
+skinparam backgroundColor white
 
 actor Estudiante
 participant Gateway

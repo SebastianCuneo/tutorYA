@@ -1,10 +1,12 @@
 @startuml componentes
-skinparam componentStyle uml2
+skinparam monochrome true
 skinparam shadowing false
+skinparam defaultFontName Arial
 skinparam defaultFontSize 12
+skinparam backgroundColor white
+skinparam componentStyle uml2
 skinparam nodesep 40
 skinparam ranksep 55
-title TutorYa UT5 — Componentes (simplificado)
 
 actor Cliente
 component "Gateway (Nginx)" as GW
@@ -34,9 +36,9 @@ interface "Cobrar\nREST" as ICOB
 U -- ISOAP
 D -- IDISP
 P -up- ICOB
-R ..> ISOAP : CB
-R ..> IDISP : CB
-R ..> ICOB : CB + Saga
+R ..> ISOAP : Circuit Breaker
+R ..> IDISP : Circuit Breaker
+R ..> ICOB : Circuit Breaker + Saga
 
 U ..> MQ : publica (outbox)
 V ..> MQ : publica (outbox)
@@ -45,11 +47,4 @@ MQ ..> D : suscribe
 MQ ..> V : suscribe
 MQ ..> M : suscribe
 
-legend right
-  CB = Circuit Breaker
-  publica: docente.registrado (Usuarios),
-  docente.verificado (Verificación),
-  reserva.confirmada / cancelada (Reservas)
-  Cada servicio tiene su propia base.
-endlegend
 @enduml

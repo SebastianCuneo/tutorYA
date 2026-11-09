@@ -1,7 +1,9 @@
 @startuml secuencia_registro
+skinparam monochrome true
 skinparam shadowing false
+skinparam defaultFontName Arial
 skinparam defaultFontSize 12
-title Registro de docente — eventos y consistencia eventual
+skinparam backgroundColor white
 
 actor Docente
 participant Usuarios
@@ -21,5 +23,4 @@ else
   RabbitMQ -> Verificación : cola verificacion.eventos
   Verificación -> Verificación : crear solicitud → ack
 end
-note over RabbitMQ, Verificación : Si Verificación está caída, el mensaje queda\nen su cola y se procesa cuando vuelve.
 @enduml
