@@ -35,6 +35,12 @@ check "el reconciliador consultó Pagos (idempotente) y la confirmó" "CONFIRMAD
 check "se cobró una sola vez" "1" "$(psql_en db-pagos "SELECT count(*) FROM pagos.pagos WHERE reserva_id=$RID")"
 
 paso "5. Pagos caído => se compensa en el acto y, tras varias fallas, el circuito se abre"
+# El circuito es por réplica y Nginx reparte casi al azar: con 2 réplicas, cada una puede ver menos
+# de 5 fallas dentro de la ventana de 10 s y el circuito no abrir. Igual que en la demo de la UT4,
+# se usa 1 réplica de Reservas durante este paso (al final se vuelve a 2).
+info "se reduce Reservas a 1 réplica para este paso"
+docker compose up -d --no-deps --scale reservas=1 reservas >/dev/null 2>&1
+esperar_sano 120 >/dev/null; sleep 6 # DNS del gateway (valid=5s) deja de ver la réplica quitada
 docker compose stop pagos >/dev/null 2>&1
 CODIGOS_PAGOS=""
 for i in $(seq 1 12); do
@@ -46,5 +52,24 @@ check "nunca se confirmó sin pago (todas 503)" "0" "$(echo $CODIGOS_PAGOS | tr 
 check "el circuito hacia Pagos llegó a abrirse" "true" "$(echo "$CODIGOS_PAGOS" | grep -q CIRCUITO_ABIERTO && echo true || echo false)"
 check "ninguna reserva de ese horario quedó tomada" "0" "$(psql_reservas "SELECT count(*) FROM reservas.reservas WHERE horario_id=$4 AND estado <> 'CANCELADA'")"
 docker compose start pagos >/dev/null 2>&1
+docker compose up -d --no-deps --scale reservas=2 reservas >/dev/null 2>&1
 esperar_healthy 90
+esperar_sano 120 >/dev/null; sleep 6 # el gateway vuelve a ver las 2 réplicas
+
+paso "6. Reserva PENDIENTE sin pago tras 30 s => el reconciliador ANULA el cobro en Pagos y recién ahí cancela"
+info "(se simula una reserva que quedó PENDIENTE hace 40 s y cuyo cobro nunca llegó a Pagos)"
+RID=$(psql_reservas "WITH n AS (INSERT INTO reservas.reservas (estudiante_id, docente_id, horario_id, estado, monto, creada_en)
+  VALUES (0, $DOC_ID, $5, 'PENDIENTE', 500, now() - interval '40 seconds') RETURNING id) SELECT id FROM n")
+_cancelada() { [ "$(estado_reserva "$RID")" = "CANCELADA" ]; }
+esperar_hasta 20 _cancelada
+check "la reserva quedó CANCELADA" "CANCELADA" "$(estado_reserva "$RID")"
+check "Pagos tiene el cobro ANULADO (fence)" "ANULADO" "$(psql_en db-pagos "SELECT estado FROM pagos.pagos WHERE reserva_id=$RID")"
+info "llega tarde el cobro de esa reserva (p. ej. un pedido que estaba demorado):"
+TARDE=$(docker compose exec -T --index 1 reservas node -e '
+  fetch("http://pagos:3000/internal/pagos", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reservaId: Number(process.argv[1]), monto: 500, tokenPago: "tok_ok" }) })
+    .then((r) => r.json()).then((b) => console.log(b.estado));' "$RID")
+check "el cobro tardío no se aprueba" "ANULADO" "$TARDE"
+check "ningún pago aprobado para una reserva cancelada" "0" \
+  "$(psql_en db-pagos "SELECT count(*) FROM pagos.pagos WHERE reserva_id=$RID AND estado='APROBADO'")"
 resumen
