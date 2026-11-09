@@ -1,0 +1,52 @@
+@startuml despliegue
+skinparam shadowing false
+skinparam defaultFontSize 12
+title TutorYa UT5 — Despliegue (simplificado)
+
+actor Cliente
+node "Azure VM (Ubuntu 22.04)\nNSG: solo 8443" as VM {
+  node "Docker Engine" as DE {
+    node "red borde" {
+      component "nginx\nGatekeeper + Offloading" as NG
+    }
+    node "red interna (sin salida a internet)" {
+      node "usuarios" as cu
+      node "docentes ×2" as cd
+      node "mensajeria" as cm
+      node "verificacion" as cv
+      node "reservas ×2" as cr
+      node "pagos" as cp
+      database "db-usuarios" as du
+      database "db-docentes" as dd
+      database "db-mensajeria" as dm
+      database "db-verificacion" as dv
+      database "db-reservas" as dr
+      database "db-pagos" as dp
+      queue "rabbitmq" as mq
+      database "redis\n(caché + config)" as rd
+    }
+  }
+}
+
+Cliente --> NG : HTTPS :8443
+NG --> cu
+NG --> cd
+NG --> cm
+NG --> cv
+NG --> cr
+cu --> du
+cd --> dd
+cm --> dm
+cv --> dv
+cr --> dr
+cp --> dp
+cr --> cp : REST
+cr --> cu : SOAP
+cd --> rd
+cu .. mq
+cd .. mq
+cm .. mq
+cv .. mq
+cr .. mq
+note bottom of mq : AMQP. Una cola durable\npor servicio suscriptor
+@enduml

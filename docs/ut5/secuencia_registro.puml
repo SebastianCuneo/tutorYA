@@ -1,0 +1,25 @@
+@startuml secuencia_registro
+skinparam shadowing false
+skinparam defaultFontSize 12
+title Registro de docente — eventos y consistencia eventual
+
+actor Docente
+participant Usuarios
+database "db-usuarios" as DB
+queue RabbitMQ
+participant Docentes
+participant Verificación
+
+Docente -> Usuarios : POST /api/usuarios/registro
+Usuarios -> DB : INSERT usuario + outbox(docente.registrado)\n(una sola transacción)
+Usuarios --> Docente : 201 (no espera a nadie)
+Usuarios -> RabbitMQ : relay publica docente.registrado
+par
+  RabbitMQ -> Docentes : cola docentes.eventos
+  Docentes -> Docentes : crear perfil → ack
+else
+  RabbitMQ -> Verificación : cola verificacion.eventos
+  Verificación -> Verificación : crear solicitud → ack
+end
+note over RabbitMQ, Verificación : Si Verificación está caída, el mensaje queda\nen su cola y se procesa cuando vuelve.
+@enduml

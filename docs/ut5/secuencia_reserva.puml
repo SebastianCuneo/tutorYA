@@ -1,0 +1,39 @@
+@startuml secuencia_reserva
+skinparam shadowing false
+skinparam defaultFontSize 12
+title Reservar clase (HU5/HU6) — Saga orquestada por Reservas
+
+actor Estudiante
+participant Gateway
+participant Reservas
+participant Usuarios
+participant Docentes
+participant Pagos
+database "db-reservas" as DB
+queue RabbitMQ
+
+Estudiante -> Gateway : POST /api/reservas
+Gateway -> Reservas
+Reservas -> Usuarios : SOAP ConsultarEstadoEstudiante (XML)
+Usuarios --> Reservas : estado AUTORIZADO
+Reservas -> Docentes : GET disponibilidad (JSON)
+Docentes --> Reservas : horario y precio
+Reservas -> DB : INSERT reserva PENDIENTE\n(UNIQUE bloquea el horario)
+Reservas -> Pagos : POST /internal/pagos (clave = reservaId)
+alt pago aprobado
+  Pagos --> Reservas : APROBADO
+  Reservas -> DB : CONFIRMADA + outbox(reserva.confirmada)
+  Reservas --> Estudiante : 201
+else pago rechazado
+  Pagos --> Reservas : RECHAZADO
+  Reservas -> DB : CANCELADA (compensación)
+  Reservas --> Estudiante : 402
+else sin respuesta (timeout)
+  Reservas --> Estudiante : 202 PENDIENTE
+  ... cada 5 s ...
+  Reservas -> Pagos : GET /internal/pagos/{id} (reconciliador)
+  Reservas -> DB : CONFIRMADA o CANCELADA
+end
+Reservas -> RabbitMQ : relay publica el evento
+RabbitMQ -> Docentes : reserva.confirmada → invalida caché
+@enduml
