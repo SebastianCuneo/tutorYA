@@ -35,7 +35,7 @@ interface "ConsultarDisponibilidad\nREST" as IDISP
 interface "Cobrar\nREST" as ICOB
 U -- ISOAP
 D -- IDISP
-P -up- ICOB
+ICOB - P
 R ..> ISOAP : Circuit Breaker
 R ..> IDISP : Circuit Breaker
 R ..> ICOB : Circuit Breaker + Saga
