@@ -129,7 +129,12 @@ async function obtenerEstadoDocente(docenteId) {
 // Docentes es la fuente de verdad del estado del perfil.
 async function alVerificarse({ datos: { docenteId, resultado } }) {
   if (!['APROBADO', 'RECHAZADO'].includes(resultado)) return;
-  await repo.actualizarEstado(docenteId, resultado);
+  // docente.registrado y docente.verificado llegan por colas distintas, sin orden entre sí (p. ej. si
+  // Docentes estuvo caído, al volver consume las dos a la vez). Si el perfil todavía no existe, el
+  // UPDATE no tocaba ninguna fila, el evento se confirmaba igual y el docente quedaba
+  // PENDIENTE_VERIFICACION para siempre. Se lanza: el evento vuelve a la cola y se reintenta.
+  const n = await repo.actualizarEstado(docenteId, resultado);
+  if (n === 0) throw new Error(`el perfil ${docenteId} todavía no existe (docente.registrado sin procesar)`);
   await alCambiarCatalogo('verificacion');
 }
 
