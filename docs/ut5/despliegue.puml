@@ -6,7 +6,7 @@ skinparam defaultFontSize 12
 skinparam backgroundColor white
 
 actor Cliente
-node "Azure VM (Ubuntu 22.04)\nNSG: solo 8443" <<device>> as VM {
+node "Equipo host (Docker Desktop)\nsolo publica 8443 y 8080" <<device>> as VM {
   node "Docker Engine" <<executionEnvironment>> as DE {
     rectangle "red borde" {
       node "nginx\nGatekeeper + Offloading" <<container>> as NG
@@ -30,7 +30,7 @@ node "Azure VM (Ubuntu 22.04)\nNSG: solo 8443" <<device>> as VM {
   }
 }
 
-Cliente --> NG : HTTPS :8443
+Cliente --> NG : HTTPS localhost:8443
 NG --> cu
 NG --> cd
 NG --> cm
