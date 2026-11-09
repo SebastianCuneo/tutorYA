@@ -26,4 +26,15 @@ async function reembolsar(reservaId) {
   return rows[0] || null;
 }
 
-module.exports = { insertarSiNoExiste, obtenerPorReserva, reembolsar };
+// Anulación (fence de la saga): ocupa la clave de idempotencia con un registro ANULADO. Si ya hay un
+// pago para esa reserva no hace nada (devuelve null) y gana el pago existente.
+async function anular(reservaId) {
+  const { rows } = await db.query(
+    `INSERT INTO pagos.pagos (reserva_id, monto, estado, motivo) VALUES ($1, 0, 'ANULADO', 'Anulado por el reconciliador')
+     ON CONFLICT (reserva_id) DO NOTHING RETURNING ${COLS}`,
+    [reservaId]
+  );
+  return rows[0] || null;
+}
+
+module.exports = { insertarSiNoExiste, obtenerPorReserva, reembolsar, anular };

@@ -39,4 +39,11 @@ async function reembolsar(reservaId) {
   return p || obtener(reservaId);
 }
 
-module.exports = { cobrar, obtener, reembolsar };
+// La usa el reconciliador de Reservas ANTES de cancelar una reserva sin registro de pago.
+// Devuelve ANULADO (desde ahora ningún cobro de esa reserva se aprueba) o el pago que ya existía
+// (el cobro llegó antes que la anulación: Reservas resuelve según ese resultado).
+async function anular(reservaId) {
+  return (await repo.anular(reservaId)) || { ...(await repo.obtenerPorReserva(reservaId)), repetido: true };
+}
+
+module.exports = { cobrar, obtener, reembolsar, anular };

@@ -102,6 +102,7 @@ Cambios de la UT5:
 | POST | `/api/reservas` | reservas | 201 CONFIRMADA · 202 PENDIENTE (pago en verificación) · 402 rechazado (CANCELADA) |
 | GET / POST | `/soap/estudiantes?wsdl`, `/soap/estudiantes` | usuarios (interno) | reemplaza a `GET /internal/usuarios/:id/estado` |
 | POST / GET | `/internal/pagos`, `/internal/pagos/:reservaId` | pagos (interno) | cobro idempotente por reserva |
+| POST | `/internal/pagos/:reservaId/anulacion`, `/internal/pagos/:reservaId/reembolso` | pagos (interno) | fence del reconciliador (`ANULADO`: un cobro tardío ya no se aprueba) y compensación de un pago aprobado |
 
 `tokenPago` de prueba: `RECHAZAR` (rechazado), `LENTO` (tarda 5 s: provoca el 202 y el reconciliador), otro valor: aprobado.
 

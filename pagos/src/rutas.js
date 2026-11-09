@@ -23,4 +23,9 @@ router.post('/internal/pagos/:reservaId/reembolso', asyncH(async (req, res) => {
   res.json(await servicio.reembolsar(idParam(req)));
 }));
 
+// Fence de la saga: el reconciliador anula el cobro antes de cancelar una reserva sin pago.
+router.post('/internal/pagos/:reservaId/anulacion', asyncH(async (req, res) => {
+  res.json(await servicio.anular(idParam(req)));
+}));
+
 module.exports = router;

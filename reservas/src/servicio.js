@@ -85,7 +85,19 @@ async function reservarClase(estudiante, body = {}) {
   // 4. Resultado del cobro.
   if (cobro.status === 200 && cobro.body.estado === 'APROBADO') {
     const r = await repo.resolver(reserva.id, 'CONFIRMADA', { referencia: cobro.body.referencia });
-    return { reserva: r || (await repo.obtener(reserva.id)), pago: cobro.body };
+    if (r) return { reserva: r, pago: cobro.body };
+    // Otra réplica ya la resolvió. Si quedó CANCELADA con el pago aprobado, se compensa el pago.
+    const actual = await repo.obtener(reserva.id);
+    if (actual.estado === 'CANCELADA') {
+      await compensarPago(reserva.id);
+      throw E.conflicto('La reserva se canceló mientras se procesaba el pago; el cobro se reembolsa');
+    }
+    return { reserva: actual, pago: cobro.body };
+  }
+  if (cobro.status === 200 && cobro.body.estado === 'ANULADO') {
+    // El reconciliador anuló el cobro (y canceló la reserva) antes de que este pedido llegara a Pagos.
+    await repo.resolver(reserva.id, 'CANCELADA', { motivo: 'Cobro anulado por demora' });
+    throw E.noDisponible('El pago demoró demasiado y se anuló; reintentá la reserva');
   }
   if (cobro.status === 200 && cobro.body.estado === 'RECHAZADO') {
     await repo.resolver(reserva.id, 'CANCELADA', { motivo: cobro.body.motivo });
@@ -96,24 +108,44 @@ async function reservarClase(estudiante, body = {}) {
   return { reserva, pago: null, mensaje: 'Pago en verificación: la reserva se confirma o se cancela en unos segundos' };
 }
 
+// Reembolso best-effort: si Pagos no responde se registra para revisión (el pago queda APROBADO).
+async function compensarPago(reservaId) {
+  try {
+    await pagos.reembolsar(reservaId);
+    logger.warn('saga: pago aprobado de una reserva cancelada; reembolsado', { reservaId });
+  } catch (e) {
+    logger.error('saga: no se pudo reembolsar el pago de una reserva cancelada', { reservaId, error: e.message });
+  }
+}
+
 // Reconciliador de la saga: resuelve las reservas PENDIENTES preguntando a Pagos (idempotente).
-// Si Pagos no tiene registro después de PLAZO_SIN_PAGO_SEG, el cobro nunca ocurrió: se cancela.
+// Si Pagos no tiene registro después de PLAZO_SIN_PAGO_SEG, se ANULA el cobro en Pagos antes de
+// cancelar (fence): sin eso, un cobro que llegara tarde se aprobaría sobre una reserva ya cancelada.
+// La anulación ocupa la clave de idempotencia (reserva_id), así que anular y cobrar no pueden ganar los dos.
 const PLAZO_SIN_PAGO_SEG = 30;
+
+async function aplicarPago(r, pago, origen) {
+  if (pago.estado === 'APROBADO') {
+    const hecha = await repo.resolver(r.id, 'CONFIRMADA', { referencia: pago.referencia });
+    // Si ya no estaba PENDIENTE y quedó CANCELADA, el pago aprobado se compensa.
+    if (!hecha && (await repo.obtener(r.id)).estado === 'CANCELADA') await compensarPago(r.id);
+    logger.info(`saga: reserva confirmada por el reconciliador (${origen})`, { reservaId: r.id });
+  } else if (['RECHAZADO', 'ANULADO'].includes(pago.estado)) {
+    await repo.resolver(r.id, 'CANCELADA', { motivo: pago.motivo || 'Sin registro de pago' });
+    logger.info(`saga: reserva cancelada por el reconciliador (${pago.estado.toLowerCase()})`, { reservaId: r.id });
+  }
+}
 
 async function reconciliar() {
   const pendientes = await repo.pendientesDesde(3);
   for (const r of pendientes) {
     try {
       const p = await pagos.consultar(r.id);
-      if (p.status === 200 && p.body.estado === 'APROBADO') {
-        await repo.resolver(r.id, 'CONFIRMADA', { referencia: p.body.referencia });
-        logger.info('saga: reserva confirmada por el reconciliador', { reservaId: r.id });
-      } else if (p.status === 200 && p.body.estado === 'RECHAZADO') {
-        await repo.resolver(r.id, 'CANCELADA', { motivo: p.body.motivo });
-        logger.info('saga: reserva cancelada por el reconciliador (pago rechazado)', { reservaId: r.id });
+      if (p.status === 200) {
+        await aplicarPago(r, p.body, 'consulta');
       } else if (p.status === 404 && Date.now() - new Date(r.creada_en).getTime() > PLAZO_SIN_PAGO_SEG * 1000) {
-        await repo.resolver(r.id, 'CANCELADA', { motivo: 'Sin registro de pago' });
-        logger.info('saga: reserva cancelada por el reconciliador (sin pago)', { reservaId: r.id });
+        const a = await pagos.anular(r.id);
+        if (a.status === 200) await aplicarPago(r, a.body, 'anulación');
       }
     } catch (e) {
       logger.debug('reconciliador: Pagos no responde; se reintenta', { reservaId: r.id, error: e.message });

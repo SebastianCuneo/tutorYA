@@ -35,4 +35,10 @@ const cobrar = ({ reservaId, monto, tokenPago }) =>
 
 const consultar = (reservaId) => circuito.ejecutar(() => getJson(`${PAGOS_URL}/internal/pagos/${reservaId}`));
 
-module.exports = { cobrar, consultar };
+// Fence: antes de cancelar una reserva sin pago, se anula el cobro en Pagos (ver reconciliar).
+const anular = (reservaId) => circuito.ejecutar(() => postJson(`${PAGOS_URL}/internal/pagos/${reservaId}/anulacion`, {}));
+
+// Compensación de un pago aprobado cuya reserva ya no se puede confirmar.
+const reembolsar = (reservaId) => circuito.ejecutar(() => postJson(`${PAGOS_URL}/internal/pagos/${reservaId}/reembolso`, {}));
+
+module.exports = { cobrar, consultar, anular, reembolsar };
