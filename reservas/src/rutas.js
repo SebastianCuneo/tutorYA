@@ -1,5 +1,5 @@
 const express = require('express');
-const { asyncH, E, auth, instancia, config, circuitos } = require('../../comun');
+const { asyncH, E, auth, instancia, circuitos } = require('../../comun');
 const servicio = require('./servicio');
 
 const router = express.Router();
@@ -10,19 +10,15 @@ function idParam(req) {
   return id;
 }
 
-const VERSION = process.env.APP_VERSION || 'ut4';
-
-// Liveness: no toca dependencias.
-router.get('/api/reservas/salud', (req, res) =>
-  res.json({ servicio: 'reservas', instancia, version: VERSION, ...config.info() }));
-
 // Estado de los circuitos de esta réplica (antes de /api/reservas/:id).
 router.get('/api/reservas/circuitos', auth.autenticar, auth.requerirRol('ADMIN'), (req, res) => {
   res.json({ instancia, circuitos: circuitos() });
 });
 
+// 201 si la saga terminó (CONFIRMADA); 202 si el pago quedó en verificación (PENDIENTE).
 router.post('/api/reservas', auth.autenticar, auth.requerirRol('ESTUDIANTE'), asyncH(async (req, res) => {
-  res.status(201).json(await servicio.reservarClase(req.usuario, req.body));
+  const r = await servicio.reservarClase(req.usuario, req.body);
+  res.status(r.reserva.estado === 'PENDIENTE' ? 202 : 201).json(r);
 }));
 
 router.get('/api/reservas', auth.autenticar, auth.requerirRol('ESTUDIANTE', 'DOCENTE'), asyncH(async (req, res) => {
@@ -37,7 +33,7 @@ router.patch('/api/reservas/:id/dictada', auth.autenticar, auth.requerirRol('DOC
   res.json(await servicio.confirmarClaseDictada(req.usuario, idParam(req)));
 }));
 
-// Ruta interna: Nginx no la expone; solo la usa el Núcleo dentro de la red de Docker.
+// Ruta interna: Nginx no la expone; solo la usa Docentes dentro de la red de Docker.
 // ?docenteIds=1,2,3 (una llamada por búsqueda) -> { ocupados: { "1": [ids], ... } }
 // ?docenteId=1 (UT3)                          -> { docenteId, horarioIds }
 router.get('/internal/reservas/horarios-ocupados', asyncH(async (req, res) => {

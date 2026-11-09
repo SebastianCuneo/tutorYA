@@ -106,29 +106,51 @@ http {
       return 404 '{"error":{"codigo":"NO_ENCONTRADO","mensaje":"Ruta no encontrada"}}';
     }
 
-    # Endpoints de salud: sin reintento en otra réplica (informan el estado de la réplica que respondió).
-    location ~ ^/api/reservas/salud {
-      set $upstream_reservas http://reservas:3000;
-      proxy_pass $upstream_reservas;
+    # ---------- UT5: enrutamiento a cada microservicio ----------
+    # Con variable en proxy_pass, nginx resuelve el nombre en cada request (según `valid`) y reparte
+    # entre las réplicas. Si un servicio está caído, solo fallan SUS rutas (502); el resto sigue.
+
+    # Liveness del gateway (no depende de ningún servicio).
+    location = /api/salud {
+      return 200 '{"servicio":"gateway","estado":"OK"}';
+    }
+
+    # Salud de cada servicio: /api/salud/<servicio> (liveness) y /api/salud/<servicio>/listo (readiness).
+    # Sin reintento en otra réplica: informan el estado de la réplica que respondió. Pagos es interno.
+    location ~ ^/api/salud/(usuarios|docentes|mensajeria|verificacion|reservas)(/listo)?$ {
+      set $svc $1;
+      proxy_pass http://$svc:3000;
       proxy_next_upstream off;
     }
 
-    location ~ ^/api/salud {
-      set $upstream_nucleo http://nucleo:3000;
-      proxy_pass $upstream_nucleo;
-      proxy_next_upstream off;
+    location ~ ^/api/(usuarios|autorizaciones|admin)(/|$) {
+      set $upstream_usuarios http://usuarios:3000;
+      proxy_pass $upstream_usuarios;
     }
 
-    # Con variable en proxy_pass, nginx resuelve el nombre en cada request (según `valid`)
-    # y reparte entre las IPs devueltas.
-    location /api/reservas {
+    location ~ ^/api/(docentes|circuitos|metricas)(/|$) {
+      set $upstream_docentes http://docentes:3000;
+      proxy_pass $upstream_docentes;
+    }
+
+    location ~ ^/api/(mensajes|conversaciones)(/|$) {
+      set $upstream_mensajeria http://mensajeria:3000;
+      proxy_pass $upstream_mensajeria;
+    }
+
+    location ~ ^/api/verificaciones(/|$) {
+      set $upstream_verificacion http://verificacion:3000;
+      proxy_pass $upstream_verificacion;
+    }
+
+    location ~ ^/api/reservas(/|$) {
       set $upstream_reservas http://reservas:3000;
       proxy_pass $upstream_reservas;
     }
 
+    # Cualquier otra ruta de /api/ => 404 en el gateway.
     location /api/ {
-      set $upstream_nucleo http://nucleo:3000;
-      proxy_pass $upstream_nucleo;
+      return 404 '{"error":{"codigo":"NO_ENCONTRADO","mensaje":"Ruta no encontrada"}}';
     }
   }
 }

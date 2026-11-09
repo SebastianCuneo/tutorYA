@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  TutorYa - Contrato SOAP del servicio Usuarios (UT5).
+  Migra la operación REST GET /internal/usuarios/:id/estado (JSON) a SOAP 1.1 document/literal (XML).
+  La consume Reservas antes de reservar (HU5/HU6). La dirección real la fija el servidor al publicar el WSDL.
+-->
+<definitions name="EstudiantesService"
+  targetNamespace="http://tutorya.uy/usuarios/estudiantes"
+  xmlns="http://schemas.xmlsoap.org/wsdl/"
+  xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"
+  xmlns:tns="http://tutorya.uy/usuarios/estudiantes"
+  xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+
+  <types>
+    <xsd:schema targetNamespace="http://tutorya.uy/usuarios/estudiantes" elementFormDefault="qualified">
+      <xsd:element name="ConsultarEstadoEstudianteRequest">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="estudianteId" type="xsd:int"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+      <xsd:element name="ConsultarEstadoEstudianteResponse">
+        <xsd:complexType>
+          <xsd:sequence>
+            <xsd:element name="id" type="xsd:int"/>
+            <xsd:element name="rol" type="xsd:string"/>
+            <xsd:element name="esMenor" type="xsd:boolean"/>
+            <xsd:element name="estado" type="xsd:string"/>
+          </xsd:sequence>
+        </xsd:complexType>
+      </xsd:element>
+    </xsd:schema>
+  </types>
+
+  <message name="ConsultarEstadoEstudianteInput">
+    <part name="parameters" element="tns:ConsultarEstadoEstudianteRequest"/>
+  </message>
+  <message name="ConsultarEstadoEstudianteOutput">
+    <part name="parameters" element="tns:ConsultarEstadoEstudianteResponse"/>
+  </message>
+
+  <portType name="EstudiantesPortType">
+    <operation name="ConsultarEstadoEstudiante">
+      <input message="tns:ConsultarEstadoEstudianteInput"/>
+      <output message="tns:ConsultarEstadoEstudianteOutput"/>
+    </operation>
+  </portType>
+
+  <binding name="EstudiantesBinding" type="tns:EstudiantesPortType">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <operation name="ConsultarEstadoEstudiante">
+      <soap:operation soapAction="http://tutorya.uy/usuarios/estudiantes/ConsultarEstadoEstudiante"/>
+      <input><soap:body use="literal"/></input>
+      <output><soap:body use="literal"/></output>
+    </operation>
+  </binding>
+
+  <service name="EstudiantesService">
+    <port name="EstudiantesPort" binding="tns:EstudiantesBinding">
+      <soap:address location="http://usuarios:3000/soap/estudiantes"/>
+    </port>
+  </service>
+</definitions>

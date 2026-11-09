@@ -785,14 +785,14 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/reservas/salud",
+              "raw": "{{baseUrl}}/api/salud/reservas",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "reservas",
-                "salud"
+                "salud",
+                "reservas"
               ],
               "query": []
             },
@@ -1033,13 +1033,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/salud/listo",
+              "raw": "{{baseUrl}}/api/salud/usuarios/listo",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
                 "salud",
+                "usuarios",
                 "listo"
               ],
               "query": []
@@ -1055,14 +1056,14 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{baseUrl}}/api/reservas/salud/listo",
+              "raw": "{{baseUrl}}/api/salud/reservas/listo",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "reservas",
                 "salud",
+                "reservas",
                 "listo"
               ],
               "query": []

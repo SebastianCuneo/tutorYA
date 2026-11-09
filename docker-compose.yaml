@@ -1,5 +1,9 @@
 name: tutorya
 
+# UT5: microservicios. Seis servicios (usuarios, docentes, mensajeria, verificacion, reservas, pagos),
+# cada uno con SU base PostgreSQL (Database per Service), más RabbitMQ (eventos), Redis (caché y config)
+# y Nginx (gateway). Todos los servicios usan la misma imagen (Dockerfile con ARG SERVICIO).
+
 x-entorno-app: &entorno-app
   DB_PORT: "5432"
   DB_USER: tutorya
@@ -8,51 +12,75 @@ x-entorno-app: &entorno-app
   JWT_SECRET: ${JWT_SECRET:-dev-secret-cambiar}
   PORT: "3000"
   REDIS_URL: redis://redis:6379
-  APP_VERSION: ${APP_VERSION:-ut4}
+  RABBITMQ_URL: amqp://tutorya:${RABBITMQ_PASSWORD:-tutorya}@rabbitmq:5672
+  APP_VERSION: ${APP_VERSION:-ut5}
   # Habilita /internal/fallas/* (inyección de fallas para las demos). false en producción.
   FALLAS_HABILITADAS: ${FALLAS_HABILITADAS:-true}
 
+# Base de cada servicio: misma imagen y healthcheck; cambia el volumen y el script de inicio.
+x-db: &db
+  networks: [interna]
+  image: postgres:16-alpine
+  environment:
+    POSTGRES_USER: tutorya
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tutorya}
+    POSTGRES_DB: tutorya
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U tutorya -d tutorya"]
+    interval: 3s
+    timeout: 3s
+    retries: 20
+
+# Servicio de aplicación: misma imagen, sin puertos publicados (Gatekeeper) y sin estado (--scale).
+x-app: &app
+  networks: [interna]
+  restart: unless-stopped
+
 # Gatekeeper: dos redes. "borde" (la única con puertos publicados, solo Nginx) e "interna"
-# (internal: true, sin salida al exterior) para servicios, bases y Redis.
+# (internal: true, sin salida al exterior) para servicios, bases, Redis y RabbitMQ.
 networks:
   borde:
   interna:
     internal: true
 
 services:
-  # Bulkhead de datos: una base por servicio, cada una con su volumen. Si cae db-nucleo,
-  # Reservas sigue atendiendo con db-reservas (y al revés).
-  db-nucleo:
-    networks: [interna]
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: tutorya
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tutorya}
-      POSTGRES_DB: tutorya
+  # Database per Service (Bulkhead de datos): seis bases, cada una con su volumen.
+  # Si cae la base de un servicio, solo ese servicio se degrada.
+  db-usuarios:
+    <<: *db
     volumes:
-      - pgdata-nucleo:/var/lib/postgresql/data
-      - ./db/init_nucleo.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tutorya -d tutorya"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
+      - pgdata-usuarios:/var/lib/postgresql/data
+      - ./db/init_usuarios.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  db-docentes:
+    <<: *db
+    volumes:
+      - pgdata-docentes:/var/lib/postgresql/data
+      - ./db/init_docentes.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  db-mensajeria:
+    <<: *db
+    volumes:
+      - pgdata-mensajeria:/var/lib/postgresql/data
+      - ./db/init_mensajeria.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  db-verificacion:
+    <<: *db
+    volumes:
+      - pgdata-verificacion:/var/lib/postgresql/data
+      - ./db/init_verificacion.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
   db-reservas:
-    networks: [interna]
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: tutorya
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tutorya}
-      POSTGRES_DB: tutorya
+    <<: *db
     volumes:
       - pgdata-reservas:/var/lib/postgresql/data
       - ./db/init_reservas.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U tutorya -d tutorya"]
-      interval: 3s
-      timeout: 3s
-      retries: 20
+
+  db-pagos:
+    <<: *db
+    volumes:
+      - pgdata-pagos:/var/lib/postgresql/data
+      - ./db/init_pagos.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
   # Caché (Cache-Aside) y almacén de configuración (External Configuration Store).
   redis:
@@ -68,42 +96,146 @@ services:
       timeout: 3s
       retries: 20
 
-  # Sin container_name, sin volúmenes y sin puertos publicados: permite --scale.
-  # Gatekeeper: los servicios solo están en la red interna; el único acceso es Nginx.
-  nucleo:
+  # UT5: broker de eventos. Exchange "tutorya.eventos" (topic) y una cola durable por servicio
+  # suscriptor. Volumen propio: los mensajes persistentes sobreviven a un reinicio del broker.
+  rabbitmq:
     networks: [interna]
+    image: rabbitmq:3.13-management-alpine
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: tutorya
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-tutorya}
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # Microservicios. Gatekeeper: solo en la red interna; el único acceso desde afuera es Nginx.
+  usuarios:
+    <<: *app
     build:
       context: .
-      dockerfile: nucleo/Dockerfile
+      args:
+        SERVICIO: usuarios
     environment:
       <<: *entorno-app
-      DB_HOST: db-nucleo
-      RESERVAS_URL: http://reservas:3000
+      SERVICIO: usuarios
+      DB_HOST: db-usuarios
       PUBLIC_URL: ${PUBLIC_URL:-https://localhost:${GATEWAY_TLS_PORT:-8443}}
     depends_on:
-      db-nucleo:
+      db-usuarios:
         condition: service_healthy
       redis:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+
+  docentes:
+    <<: *app
+    build:
+      context: .
+      args:
+        SERVICIO: docentes
+    environment:
+      <<: *entorno-app
+      SERVICIO: docentes
+      DB_HOST: db-docentes
+      RESERVAS_URL: http://reservas:3000
+    depends_on:
+      db-docentes:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
     deploy:
       replicas: 2
 
-  reservas:
-    networks: [interna]
+  mensajeria:
+    <<: *app
     build:
       context: .
-      dockerfile: reservas/Dockerfile
+      args:
+        SERVICIO: mensajeria
     environment:
       <<: *entorno-app
+      SERVICIO: mensajeria
+      DB_HOST: db-mensajeria
+    depends_on:
+      db-mensajeria:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+
+  verificacion:
+    <<: *app
+    build:
+      context: .
+      args:
+        SERVICIO: verificacion
+    environment:
+      <<: *entorno-app
+      SERVICIO: verificacion
+      DB_HOST: db-verificacion
+    depends_on:
+      db-verificacion:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      rabbitmq:
+        condition: service_healthy
+    deploy:
+      replicas: 1
+
+  reservas:
+    <<: *app
+    build:
+      context: .
+      args:
+        SERVICIO: reservas
+    environment:
+      <<: *entorno-app
+      SERVICIO: reservas
       DB_HOST: db-reservas
-      NUCLEO_URL: http://nucleo:3000
+      USUARIOS_URL: http://usuarios:3000
+      DOCENTES_URL: http://docentes:3000
+      PAGOS_URL: http://pagos:3000
     depends_on:
       db-reservas:
         condition: service_healthy
       redis:
         condition: service_started
+      rabbitmq:
+        condition: service_healthy
     deploy:
       replicas: 2
+
+  pagos:
+    <<: *app
+    build:
+      context: .
+      args:
+        SERVICIO: pagos
+    environment:
+      <<: *entorno-app
+      SERVICIO: pagos
+      DB_HOST: db-pagos
+    depends_on:
+      db-pagos:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    deploy:
+      replicas: 1
 
   # Gateway Offloading: genera un certificado autofirmado si no existe (one-shot).
   # Va en "borde" porque necesita salida a internet para instalar openssl.
@@ -142,12 +274,23 @@ services:
     depends_on:
       certs:
         condition: service_completed_successfully
-      nucleo:
+      usuarios:
+        condition: service_healthy
+      docentes:
+        condition: service_healthy
+      mensajeria:
+        condition: service_healthy
+      verificacion:
         condition: service_healthy
       reservas:
         condition: service_healthy
 
 volumes:
-  pgdata-nucleo:
+  pgdata-usuarios:
+  pgdata-docentes:
+  pgdata-mensajeria:
+  pgdata-verificacion:
   pgdata-reservas:
+  pgdata-pagos:
   redisdata:
+  rabbitdata:

@@ -1,6 +1,6 @@
 #cloud-config
 # TutorYa en una VM Ubuntu 22.04 de Azure: instala Docker Engine + plugin compose, clona la rama
-# ut4-patrones y levanta todo con docker compose. Lo usa scripts/desplegar_azure.azcli (--custom-data).
+# ut5-microservicios y levanta todo con docker compose. Lo usa scripts/desplegar_azure.azcli (--custom-data).
 # Capas: Azure VM (aislamiento fuerte, NSG) → Docker Engine → contenedores (escalado, reproducibilidad).
 
 package_update: true
@@ -23,11 +23,11 @@ runcmd:
   - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
   - usermod -aG docker tutorya
   # Código: la misma rama y el mismo docker-compose.yaml que se usan en local.
-  - git clone --branch ut4-patrones https://github.com/SebastianCuneo/tutorYA /opt/tutorya
+  - git clone --branch ut5-microservicios https://github.com/SebastianCuneo/tutorYA /opt/tutorya
   # Secretos solo en .env (variables de entorno), nunca en el almacén de configuración (Redis).
   # Sin inyección de fallas en la nube.
   - >-
-    sh -c 'printf "JWT_SECRET=%s\nPOSTGRES_PASSWORD=%s\nFALLAS_HABILITADAS=false\n"
-    "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > /opt/tutorya/.env'
+    sh -c 'printf "JWT_SECRET=%s\nPOSTGRES_PASSWORD=%s\nRABBITMQ_PASSWORD=%s\nFALLAS_HABILITADAS=false\n"
+    "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" > /opt/tutorya/.env'
   - chmod 600 /opt/tutorya/.env
   - cd /opt/tutorya && docker compose up -d --build

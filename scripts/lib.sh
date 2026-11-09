@@ -76,11 +76,17 @@ login() {
   TOKEN=$(echo "$CUERPO" | jq -r '.token')
 }
 
-# aprobar_docente DOCENTE_ID : el verificador agenda la llamada y aprueba
+# aprobar_docente DOCENTE_ID : el verificador agenda la llamada y aprueba.
+# UT5: la solicitud la crea Verificación al recibir docente.registrado (asíncrono): se espera a que exista.
 aprobar_docente() {
   local docente="$1" ver_token sol
   login verificador@tutorya.uy verificador123
   ver_token="$TOKEN"
+  _solicitud_de() {
+    curl -s -k -H "Authorization: Bearer $ver_token" "$BASE/api/verificaciones?estado=PENDIENTE" \
+      | jq -e --argjson d "$docente" '.[] | select(.docente_id==$d) | .id'
+  }
+  esperar_hasta 15 _solicitud_de
   req GET '/api/verificaciones?estado=PENDIENTE' "" "$ver_token"
   sol=$(echo "$CUERPO" | jq -r --argjson d "$docente" '.[] | select(.docente_id==$d) | .id')
   req POST "/api/verificaciones/$sol/llamada" "$(jq -nc --arg f "$(fecha_futura 1)" '{fecha:$f}')" "$ver_token"
@@ -95,17 +101,21 @@ fecha_futura() {
   printf '%sT%02d:00:00Z' "$d" "$hora"
 }
 
-# esperar_sano [TIMEOUT_SEG]: espera a que el gateway responda a ambos endpoints de salud
+# UT5: microservicios expuestos por el gateway (Pagos es interno).
+SERVICIOS="usuarios docentes mensajeria verificacion reservas"
+
+# esperar_sano [TIMEOUT_SEG]: espera a que el gateway responda la readiness de cada microservicio
 # y a que todos los contenedores con healthcheck estén healthy.
 esperar_sano() {
-  local limite="${1:-120}" t=0
+  local limite="${1:-180}" t=0
   printf '   esperando servicios sanos'
   while [ "$t" -lt "$limite" ]; do
-    local malos
+    local malos s ok=1
     malos=$(docker compose ps --format '{{.Name}} {{.Health}}' 2>/dev/null | awk '$2!="" && $2!="healthy"' | wc -l | tr -d ' ')
-    if [ "$malos" = "0" ] \
-      && [ "$(curl -s -k -o /dev/null -w '%{http_code}' "$BASE/api/salud")" = "200" ] \
-      && [ "$(curl -s -k -o /dev/null -w '%{http_code}' "$BASE/api/reservas/salud")" = "200" ]; then
+    for s in $SERVICIOS; do
+      [ "$(curl -s -k -o /dev/null -w '%{http_code}' "$BASE/api/salud/$s/listo")" = "200" ] || ok=0
+    done
+    if [ "$malos" = "0" ] && [ "$ok" = "1" ]; then
       printf ' OK (%ss)\n' "$t"
       return 0
     fi
@@ -117,12 +127,28 @@ esperar_sano() {
   return 1
 }
 
-# psql_en SERVICIO SQL : consulta que devuelve un valor, en la base de un servicio (db-nucleo | db-reservas)
+# psql_en BASE SQL : consulta que devuelve un valor, en la base de un servicio (UT5: db-<servicio>)
 psql_en() {
   docker compose exec -T "$1" psql -U tutorya -d tutorya -tAc "$2" | tr -d '[:space:]'
 }
-psql_nucleo()   { psql_en db-nucleo "$1"; }
 psql_reservas() { psql_en db-reservas "$1"; }
+
+# esperar_hasta TIMEOUT_SEG COMANDO... : reintenta el comando cada 0,5 s hasta que salga OK.
+# UT5: los efectos de un evento son asíncronos (consistencia eventual): las demos esperan, no asumen.
+esperar_hasta() {
+  local limite="$1"; shift
+  local fin=$(( $(date +%s) + limite ))
+  while [ "$(date +%s)" -le "$fin" ]; do
+    "$@" >/dev/null 2>&1 && return 0
+    sleep 0.5
+  done
+  return 1
+}
+
+# colas_rabbit : mensajes en espera y consumidores de cada cola (desde el contenedor del broker)
+colas_rabbit() {
+  docker compose exec -T rabbitmq rabbitmqctl -q list_queues name messages consumers 2>/dev/null | sed 's/^/     /'
+}
 
 # ---------------------------------------------------------------- UT4
 
@@ -201,4 +227,34 @@ estudiante_demo() {
   registrar "est_$SUFIJO@demo.uy" "Estudiante Demo" ESTUDIANTE >/dev/null
   login "est_$SUFIJO@demo.uy" >/dev/null
   EST_TOKEN="$TOKEN"
+}
+
+# ---------------------------------------------------------------- UT5
+
+# preparar_docente N_HORARIOS [MATERIA] : registra un docente, espera los eventos, lo aprueba y le carga
+# una materia y N horarios futuros. Deja DOC_ID, DOC_TOKEN y HORARIOS (ids separados por espacio).
+preparar_docente() {
+  local n="$1" materia="${2:-Fisica}" i
+  registrar "doc_$SUFIJO@demo.uy" "Docente Demo $SUFIJO" DOCENTE >/dev/null
+  DOC_ID="$USUARIO_ID"
+  login "doc_$SUFIJO@demo.uy" >/dev/null
+  DOC_TOKEN="$TOKEN"
+  # El perfil lo crea Docentes al recibir docente.registrado.
+  _perfil() { [ "$(curl -s -k -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $DOC_TOKEN" "$BASE/api/docentes/me")" = "200" ]; }
+  esperar_hasta 15 _perfil || info "⚠ el perfil del docente no apareció (¿Docentes o RabbitMQ caídos?)"
+  aprobar_docente "$DOC_ID" >/dev/null
+  req PUT /api/docentes/me/materias "{\"materias\":[\"$materia\"]}" "$DOC_TOKEN" >/dev/null
+  HORARIOS=""
+  for i in $(seq 1 "$n"); do
+    req POST /api/docentes/me/horarios \
+      "$(jq -nc --arg i "$(fecha_futura $((i + 1)) 10)" --arg f "$(fecha_futura $((i + 1)) 11)" '{inicio:$i,fin:$f,precio:500}')" "$DOC_TOKEN" >/dev/null
+    HORARIOS="$HORARIOS $(echo "$CUERPO" | jq -r .id)"
+  done
+  # Docentes marca el perfil APROBADO al recibir docente.verificado: se espera a verlo en el catálogo.
+  estudiante_demo
+  _en_catalogo() {
+    curl -s -k -H "Authorization: Bearer $EST_TOKEN" "$BASE/api/docentes?materia=$materia" \
+      | jq -e --argjson d "$DOC_ID" '[.[] | select((.docenteId // .id // .docente_id) == $d)] | length > 0'
+  }
+  esperar_hasta 20 _en_catalogo || info "⚠ el docente no apareció en el catálogo"
 }

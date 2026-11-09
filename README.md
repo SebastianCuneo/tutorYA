@@ -1,128 +1,132 @@
-# TutorYa — API REST (TFU UT3 + UT4, ANDIS II, UCU)
+# TutorYa — Microservicios (TFU UT5, ANDIS II, UCU)
 
-Plataforma que conecta estudiantes con docentes particulares. Implementación de la arquitectura
-del grupo: 5 componentes lógicos, 2 servicios desplegables, gateway Nginx y una base PostgreSQL 16
-por servicio (`db-nucleo` y `db-reservas`).
+Plataforma que conecta estudiantes con docentes particulares. En la UT5 la aplicación pasa de
+**Service-Based** (UT4: Núcleo + Reservas) a **Microservicios**: seis servicios, cada uno con su base,
+que se comunican por REST, por SOAP (una operación) y por eventos en RabbitMQ.
 
 ## Requisitos
 
-Docker con Compose v2, y para los scripts de demo: `bash`, `curl` (>= 7.84), `jq`, `perl` y `openssl`.
+Docker con Compose v2, y para los scripts de demo: `bash` (4+), `curl` (>= 7.84), `jq`, `perl` y `openssl`.
 
 ## Cómo levantar
 
 ```bash
-docker compose up -d --build     # certs (one-shot), redis, db-nucleo, db-reservas, 2 réplicas de nucleo, 2 de reservas y nginx
-curl -k https://localhost:8443/api/salud
+docker compose up -d --build        # 6 servicios, 6 bases, RabbitMQ, Redis y Nginx
+./scripts/demo_todo.sh              # espera a que todo esté sano y corre las demos de la UT5
 ```
 
-El gateway publica `8443` (HTTPS) y `8080` (HTTP, redirige a HTTPS). Si están ocupados, copiá
-`.env.example` a `.env` y cambiá `GATEWAY_TLS_PORT` / `GATEWAY_PORT` (los scripts los leen de ahí).
-El certificado es autofirmado (lo genera el servicio `certs` en `nginx/certs/`, que no se commitea):
-usá `curl -k` y, en Postman, la colección ya trae la verificación SSL desactivada.
-Para borrar todo, incluidas las bases y Redis: `docker compose down -v`.
-
-**Entorno levantado con la UT3**: el volumen `pgdata` de la base única ya no se usa. Lo más simple es
-`docker compose down -v` y volver a levantar: `db/init_nucleo.sql` y `db/init_reservas.sql` corren
-solos en volúmenes vacíos. Para una base del Núcleo ya creada con el init de la UT3, la migración agrega el
-rol ADMIN y la vista materializada sin perder datos (idempotente):
-
-```bash
-docker compose exec -T db-nucleo psql -U tutorya -d tutorya -v ON_ERROR_STOP=1 < db/migraciones/ut4.sql
-```
-
-| Servicio del compose | Red | Puertos publicados | Rol |
-|---|---|---|---|
-| `nginx` | borde + interna | 8443 (HTTPS), 8080 (→ HTTPS) | Gatekeeper y Gateway Offloading, único acceso |
-| `certs` | borde | — | One-shot: certificado autofirmado |
-| `nucleo` ×2 | interna | — | Usuarios, Docentes, Mensajería, Verificación |
-| `reservas` ×2 | interna | — | Reservas y pagos |
-| `db-nucleo` | interna | — | PostgreSQL: usuarios, docentes (+ vista `docentes.catalogo`), mensajeria, verificacion |
-| `db-reservas` | interna | — | PostgreSQL: reservas (`reservas`, `pagos`) |
-| `redis` | interna | — | Caché, configuración externa y canales de eventos |
+El gateway publica `8443` (HTTPS) y `8080` (redirige a HTTPS); se cambian con `.env` (ver `.env.example`).
+Certificado autofirmado: usar `curl -k`. Para borrar todo (bases, Redis y RabbitMQ): `docker compose down -v`.
+Si venías de la UT4, hacé `docker compose down -v` antes: los volúmenes cambiaron.
 
 ## Arquitectura
 
+| Servicio | Responsabilidad (HU) | Base | Expone | Consume |
+|---|---|---|---|---|
+| `usuarios` | Registro, login JWT, autorización de menores (HU1, HU2, HU7) | `db-usuarios` | REST + **SOAP** `ConsultarEstadoEstudiante` | — |
+| `docentes` ×2 | Perfil, catálogo y disponibilidad (HU3, HU8) | `db-docentes` + Redis (caché) | REST | eventos `docente.*`, `reserva.*` |
+| `mensajeria` | Conversaciones (HU4, HU9) | `db-mensajeria` | REST | evento `docente.verificado` |
+| `verificacion` | Verificación de docentes (HU10) | `db-verificacion` | REST | evento `docente.registrado` |
+| `reservas` ×2 | Saga de reserva y pago, clase dictada (HU5, HU6, HU11) | `db-reservas` | REST | SOAP Usuarios, REST Docentes y Pagos |
+| `pagos` | Cobro simulado e idempotente | `db-pagos` | REST interno | — |
+
 ```
-                 red "borde"            │ red "interna" (internal: true, sin puertos publicados)
-cliente ─HTTPS─▶ nginx :443 (TLS) ──────┼─┬─ /api/reservas → reservas ×N ──HTTP+circuito──▶ nucleo /internal/...
-        ─HTTP──▶ nginx :80 → 301 HTTPS  │ │                     └──── db-reservas (esquema reservas: reservas, pagos)
-                                        │ └─ /api/*        → nucleo ×N  ──HTTP+circuito──▶ reservas /internal/...
-                                        │                     │  │
-                                        │                     │  └── db-nucleo (esquemas usuarios, docentes, mensajeria,
-                                        │                     │      verificacion; vista docentes.catalogo)
-                                        │                     └───── Redis: config:tutorya (config), catalogo:* (caché),
-                                        │                            canales config:cambios y reservas:eventos
+cliente ─HTTPS─▶ nginx (gateway) ─┬─ /api/usuarios, /api/autorizaciones, /api/admin ─▶ usuarios
+                                  ├─ /api/docentes, /api/metricas, /api/circuitos ───▶ docentes ×2
+                                  ├─ /api/mensajes, /api/conversaciones ─────────────▶ mensajeria
+                                  ├─ /api/verificaciones ────────────────────────────▶ verificacion
+                                  └─ /api/reservas ──────────────────────────────────▶ reservas ×2
+reservas ──SOAP──▶ usuarios      reservas ──REST──▶ docentes, pagos      docentes ──REST──▶ reservas
+usuarios, verificacion, reservas ──outbox──▶ RabbitMQ (exchange tutorya.eventos) ──▶ colas durables
 ```
 
-Cada servicio tiene su propia base (Bulkhead de datos): si cae `db-nucleo`, Reservas sigue listando y
-confirmando clases. Consistencia según el dato: **ACID local en `db-reservas`** (reserva + pago en una
-transacción, `UNIQUE(horario_id)` impide la doble reserva) y **BASE en el catálogo** (caché y vista
-materializada, ≤ 60 s de atraso, invalidados por el evento `reserva.creada`).
+Eventos (exchange `tutorya.eventos`, tipo topic):
 
-| Carpeta | Componente del UML |
+| Evento | Publica | Colas que lo reciben |
+|---|---|---|
+| `docente.registrado` | Usuarios | `docentes.eventos`, `verificacion.eventos` |
+| `docente.verificado` | Verificación | `docentes.verificaciones`, `mensajeria.verificaciones` |
+| `reserva.confirmada` / `reserva.cancelada` | Reservas | `docentes.reservas` |
+
+| Carpeta | Contenido |
 |---|---|
-| `nucleo/src/usuarios/` | Usuarios |
-| `nucleo/src/docentes/` | Docentes |
-| `nucleo/src/mensajeria/` | Mensajería |
-| `nucleo/src/verificacion/` | Verificación |
-| `nucleo/src/eventos.js` | Bus de eventos en proceso del Núcleo |
-| `reservas/src/` | Reservas (`pagos/simulador.js` = pasarela simulada) |
-| `comun/` | Biblioteca compartida: JWT + rol, errores JSON, logger, `X-Instancia`, pool de PostgreSQL, y en la UT4: config, Redis, circuit breaker, salud y `X-Request-Id` |
-| `nucleo/src/admin/` | Endpoints operativos (rol ADMIN): config, circuitos, métricas |
-| `config/default.json` | Valores por defecto de la config externa |
-| `db/init_nucleo.sql` | Base del Núcleo: esquemas, vista materializada y seed |
-| `db/init_reservas.sql` | Base de Reservas: esquema reservas |
-| `db/migraciones/ut4.sql` | Migración UT4 para bases del Núcleo ya creadas |
-| `scripts/desplegar_azure.azcli`, `scripts/cloud-init.yaml` | Despliegue en una VM de Azure |
-| `nginx/templates/nginx.conf.template` | Gateway (plantilla procesada con envsubst) |
+| `usuarios/`, `docentes/`, `mensajeria/`, `verificacion/`, `reservas/`, `pagos/` | Un microservicio cada una (`src/app.js` arranca el servicio) |
+| `usuarios/src/soap/` | Contrato `estudiantes.wsdl` y servidor SOAP |
+| `reservas/src/clienteUsuarios.js` | Cliente SOAP (lee el WSDL) |
+| `comun/` | Biblioteca operativa compartida: arranque, salud, circuit breaker, config, logger, JWT, y en la UT5 `eventos.js` (RabbitMQ + outbox) |
+| `db/init_<servicio>.sql` | Una base por servicio |
+| `Dockerfile` | Imagen única; `docker compose` la construye por servicio con `SERVICIO=<nombre>` |
 
-Cada módulo tiene `index.js` (interfaz pública, comentada con `// Interfaz: <Nombre> (HUx)`),
-`rutas.js`, `servicio.js` y `repositorio.js`. Un módulo solo consulta su propio esquema y usa a
-otro únicamente a través de su `index.js`. Reservas ↔ Núcleo solo por HTTP interno.
+## Patrones de la UT5
+
+| Patrón | Dónde | Problema que resuelve |
+|---|---|---|
+| Database per Service | `db/init_*.sql`, `docker-compose.yaml` | Una base caída solo afecta a su servicio |
+| Publisher/Subscriber + colas durables | `comun/src/eventos.js` | Un servicio caído no pierde eventos; se procesan al volver |
+| Transactional Outbox | tabla `<servicio>.outbox` + relay | El evento no se pierde si RabbitMQ está caído |
+| Competing Consumers | réplicas de `docentes` en la misma cola | Reparte el procesamiento de eventos |
+| Saga (orquestada) con compensación | `reservas/src/servicio.js` | Reserva y pago en servicios distintos, sin transacción distribuida |
+| Circuit Breaker (UT4) | clientes de Reservas hacia Usuarios, Docentes y Pagos | Falla rápida, sin cascada |
+| Health Endpoint Monitoring (UT4) | `/api/salud/<servicio>/listo` | Detección de réplicas degradadas |
 
 ## Endpoints
 
-| Método | Ruta | Interfaz (HU) | Rol |
+Los de negocio mantienen el contrato de la UT4; ahora cada uno lo atiende un microservicio:
+
+| Método | Ruta | Interfaz (HU) | Rol | Servicio |
+|---|---|---|---|---|
+| POST | `/api/usuarios/registro` | AutenticarUsuario (HU1, HU7) | público | usuarios |
+| POST | `/api/usuarios/login` | AutenticarUsuario | público | usuarios |
+| POST | `/api/autorizaciones/:token` | AutorizarMenor (HU2) | público | usuarios |
+| GET | `/api/docentes?materia=` | BuscarDocentes (HU3) | ESTUDIANTE | docentes |
+| GET | `/api/docentes/me` | GestionarPerfilDocente (HU8) | DOCENTE | docentes |
+| PUT | `/api/docentes/me/materias` | GestionarPerfilDocente (HU8) | DOCENTE | docentes |
+| POST | `/api/docentes/me/horarios` | GestionarPerfilDocente (HU8) | DOCENTE | docentes |
+| POST | `/api/mensajes` | EnviarMensaje (HU4) | ESTUDIANTE | mensajeria |
+| GET | `/api/conversaciones` | — | ESTUDIANTE, DOCENTE | mensajeria |
+| GET | `/api/conversaciones/:id/mensajes` | — | participantes | mensajeria |
+| POST | `/api/conversaciones/:id/mensajes` | ResponderMensaje (HU9) | DOCENTE | mensajeria |
+| GET | `/api/verificaciones?estado=` | VerificarDocente (HU10) | VERIFICADOR | verificacion |
+| POST | `/api/verificaciones/:id/llamada` | VerificarDocente | VERIFICADOR | verificacion |
+| POST | `/api/verificaciones/:id/resolucion` | VerificarDocente | VERIFICADOR | verificacion |
+| POST | `/api/reservas` | ReservarClase (HU5, HU6) | ESTUDIANTE | reservas |
+| GET | `/api/reservas`, `/api/reservas/:id` | — | participantes | reservas |
+| PATCH | `/api/reservas/:id/dictada` | ConfirmarClaseDictada (HU11) | DOCENTE dueño | reservas |
+
+Cambios de la UT5:
+
+| Método | Ruta | Servicio | Nota |
 |---|---|---|---|
-| POST | `/api/usuarios/registro` | AutenticarUsuario (HU1, HU7) | público |
-| POST | `/api/usuarios/login` | AutenticarUsuario | público |
-| POST | `/api/autorizaciones/:token` | AutorizarMenor (HU2) | público |
-| GET | `/api/docentes?materia=` | BuscarDocentes (HU3) | ESTUDIANTE |
-| GET | `/api/docentes/me` | GestionarPerfilDocente (HU8) | DOCENTE |
-| PUT | `/api/docentes/me/materias` | GestionarPerfilDocente (HU8) | DOCENTE |
-| POST | `/api/docentes/me/horarios` | GestionarPerfilDocente (HU8) | DOCENTE |
-| POST | `/api/mensajes` | EnviarMensaje (HU4) | ESTUDIANTE |
-| GET | `/api/conversaciones` | — | ESTUDIANTE, DOCENTE |
-| GET | `/api/conversaciones/:id/mensajes` | — | participantes |
-| POST | `/api/conversaciones/:id/mensajes` | ResponderMensaje (HU9) | DOCENTE |
-| GET | `/api/verificaciones?estado=` | VerificarDocente (HU10) | VERIFICADOR |
-| POST | `/api/verificaciones/:id/llamada` | VerificarDocente | VERIFICADOR |
-| POST | `/api/verificaciones/:id/resolucion` | VerificarDocente | VERIFICADOR |
-| POST | `/api/reservas` | ReservarClase (HU5, HU6) | ESTUDIANTE |
-| GET | `/api/reservas`, `/api/reservas/:id` | — | participantes |
-| PATCH | `/api/reservas/:id/dictada` | ConfirmarClaseDictada (HU11) | DOCENTE dueño |
-| GET | `/api/salud`, `/api/reservas/salud` | — | público |
-| GET | `/internal/usuarios/:id/estado` | ConsultarEstadoEstudiante | interno |
-| GET | `/internal/docentes/:docenteId/horarios/:horarioId` | ConsultarDisponibilidad | interno |
-| GET | `/internal/reservas/horarios-ocupados?docenteId=` | (uso interno) | interno |
+| GET | `/api/salud` | gateway | liveness del gateway |
+| GET | `/api/salud/<servicio>`, `/api/salud/<servicio>/listo` | cada servicio | liveness / readiness (incluye la conexión a RabbitMQ) |
+| POST | `/api/reservas` | reservas | 201 CONFIRMADA · 202 PENDIENTE (pago en verificación) · 402 rechazado (CANCELADA) |
+| GET / POST | `/soap/estudiantes?wsdl`, `/soap/estudiantes` | usuarios (interno) | reemplaza a `GET /internal/usuarios/:id/estado` |
+| POST / GET | `/internal/pagos`, `/internal/pagos/:reservaId` | pagos (interno) | cobro idempotente por reserva |
 
-Los `/internal/*` no se exponen por Nginx (404). Errores: `{ "error": { "codigo", "mensaje" } }` con
-400, 401, 402, 403, 404, 409, 410 (y 503 en la UT4). Usuarios semilla: `verificador@tutorya.uy` /
-`verificador123` y `admin@tutorya.uy` / `admin123`. Colección Postman en `postman/` (variables
-`{{baseUrl}}` y `{{token}}`; los endpoints nuevos están en la carpeta "UT4").
+`tokenPago` de prueba: `RECHAZAR` (rechazado), `LENTO` (tarda 5 s: provoca el 202 y el reconciliador), otro valor: aprobado.
 
-## Demos
+## Demos UT5
 
-Cada script imprime requests, códigos HTTP y un veredicto ✅/❌; se pueden re-ejecutar.
+| Script | Qué demuestra |
+|---|---|
+| `demo_microservicios.sh` | Un caso de uso que cruza los seis servicios (eventos, SOAP, saga) |
+| `demo_soap.sh` | WSDL, pedido y respuesta XML, SOAP Fault y consumo desde Reservas |
+| `demo_saga.sh` | Pago aprobado, rechazado (compensación), lento (reconciliador) y Pagos caído (circuito) |
+| `demo_eventos.sh` | Cola durable con Verificación caída y outbox con RabbitMQ caído |
+| `demo_disponibilidad.sh [componente]` | Atributo de calidad: % de éxito de 6 operaciones antes y durante la falla de un componente |
 
-Todas las demos (UT3 y UT4) van por HTTPS: `BASE=https://localhost:${GATEWAY_TLS_PORT:-8443}`.
+Comparación con la UT4: en la rama `ut4-patrones`, con su compose levantado,
+`git show ut5-microservicios:scripts/demo_disponibilidad.sh > scripts/demo_disponibilidad_ut5.sh` y
+`bash scripts/demo_disponibilidad_ut5.sh mensajeria` (detecta la arquitectura y detiene `nucleo`).
+Los resultados quedan en `scripts/salidas/`.
 
-```bash
-./scripts/demo_componentes.sh    # flujo completo por las interfaces
-./scripts/demo_escalabilidad.sh  # --scale reservas=3 nucleo=2 y reparto por X-Instancia
-./scripts/demo_sin_estado.sh     # cae la réplica que atendió; el mismo token sigue valiendo
-./scripts/demo_acid.sh           # doble reserva concurrente, pago rechazado, durabilidad
-```
+---
+
+# Historial: UT3 y UT4
+
+Lo que sigue documenta las unidades anteriores (rama `ut4-patrones`). Donde dice Núcleo, en la UT5
+corresponde a los servicios Usuarios, Docentes, Mensajería y Verificación. Las demos de la UT3/UT4
+están en `scripts/ut4/` y se corren en esa rama.
 
 ## Decisiones de implementación (UT3)
 
@@ -304,7 +308,7 @@ az group delete -n tutorya-rg --yes --no-wait   # al terminar: borra la VM y tod
 
 `desplegar_azure.azcli` crea el grupo de recursos y una VM `Standard_B2s`, abre solo el `8443` en el
 NSG, restringe el SSH a la IP pública de quien lo ejecuta y espera a que
-`https://<ip>:8443/api/salud/listo` responda 200. La VM se configura con `scripts/cloud-init.yaml`:
-instala Docker Engine y el plugin compose (repositorio oficial), clona la rama `ut4-patrones`, genera
+`https://<ip>:8443/api/salud/reservas/listo` responda 200. La VM se configura con `scripts/cloud-init.yaml`:
+instala Docker Engine y el plugin compose (repositorio oficial), clona la rama `ut5-microservicios`, genera
 un `.env` con `JWT_SECRET` y `POSTGRES_PASSWORD` aleatorios y `FALLAS_HABILITADAS=false`, y corre
 `docker compose up -d --build`.

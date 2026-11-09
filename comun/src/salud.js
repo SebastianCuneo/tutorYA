@@ -44,12 +44,22 @@ async function chequear(nombre, fn, critico) {
   }
 }
 
+// Chequeos extra que registra cada servicio (UT5: conexión a RabbitMQ). No críticos por defecto.
+const extras = [];
+function registrarChequeo(nombre, fn, critico = false) {
+  extras.push({ nombre, fn, critico });
+}
+
 async function calcular() {
-  const [dbR, redisR] = await Promise.all([
+  const [dbR, redisR, ...extrasR] = await Promise.all([
     chequear('db', () => db.query('SELECT 1'), true),
     chequear('redis', () => redis.ejecutar((c) => c.ping(), config.get('salud.timeoutChequeoMs')), false),
+    ...extras.map((x) => chequear(x.nombre, x.fn, x.critico)),
   ]);
   const chequeos = { db: dbR, redis: redisR };
+  extras.forEach((x, i) => {
+    chequeos[x.nombre] = extrasR[i];
+  });
   const estado = !forzada && Object.values(chequeos).every((c) => c.ok || !c.critico) ? 'OK' : 'DEGRADADO';
   if (ultimo && ultimo.estado !== estado) logger.warn(`readiness: ${ultimo.estado} → ${estado}`, { chequeos });
   return { estado, instancia, ...(forzada ? { fallaInyectada: true } : {}), chequeos };
@@ -113,4 +123,4 @@ function routerFallas() {
   return router;
 }
 
-module.exports = { readiness, rutaListo, middlewareListo, routerFallas };
+module.exports = { readiness, rutaListo, middlewareListo, routerFallas, registrarChequeo };

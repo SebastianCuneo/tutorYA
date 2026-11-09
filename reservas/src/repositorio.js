@@ -1,24 +1,52 @@
-const { db } = require('../../comun');
+const { db, eventos } = require('../../comun');
 
-const RESERVA = 'id, estudiante_id, docente_id, horario_id, estado, monto, creada_en';
+const RESERVA = 'id, estudiante_id, docente_id, horario_id, estado, monto, referencia_pago, motivo, creada_en';
 
-// Los inserts reciben el cliente de la transacción en curso.
-async function insertarReserva(cliente, { estudianteId, docenteId, horarioId, monto }) {
-  const { rows } = await cliente.query(
+// Paso 1 de la saga: la reserva nace PENDIENTE. El índice único parcial (horario_id, salvo CANCELADA)
+// ya bloquea el horario: de dos pedidos concurrentes, el segundo falla con 409.
+async function insertarPendiente({ estudianteId, docenteId, horarioId, monto }) {
+  const { rows } = await db.query(
     `INSERT INTO reservas.reservas (estudiante_id, docente_id, horario_id, estado, monto)
-     VALUES ($1,$2,$3,'CONFIRMADA',$4) RETURNING ${RESERVA}`,
+     VALUES ($1,$2,$3,'PENDIENTE',$4) RETURNING ${RESERVA}`,
     [estudianteId, docenteId, horarioId, monto]
   );
   return rows[0];
 }
 
-async function insertarPago(cliente, { reservaId, monto, referencia }) {
-  const { rows } = await cliente.query(
-    `INSERT INTO reservas.pagos (reserva_id, monto, referencia) VALUES ($1,$2,$3)
-     RETURNING id, reserva_id, monto, referencia, pagado_en`,
-    [reservaId, monto, referencia]
+// Transición PENDIENTE -> estadoNuevo + evento en la outbox, en una sola transacción local.
+// Condicional: si otra réplica (o el reconciliador) ya la resolvió, no hace nada y devuelve null.
+async function resolver(id, estadoNuevo, { referencia = null, motivo = null } = {}) {
+  const cliente = await db.pool.connect();
+  try {
+    await cliente.query('BEGIN');
+    const { rows } = await cliente.query(
+      `UPDATE reservas.reservas SET estado = $2, referencia_pago = $3, motivo = $4
+       WHERE id = $1 AND estado = 'PENDIENTE' RETURNING ${RESERVA}`,
+      [id, estadoNuevo, referencia, motivo]
+    );
+    const r = rows[0];
+    if (r) {
+      const tipo = estadoNuevo === 'CONFIRMADA' ? 'reserva.confirmada' : 'reserva.cancelada';
+      await eventos.guardar(cliente, tipo, { reservaId: r.id, docenteId: r.docente_id, horarioId: r.horario_id, estudianteId: r.estudiante_id });
+    }
+    await cliente.query('COMMIT');
+    return r || null;
+  } catch (e) {
+    await cliente.query('ROLLBACK').catch(() => {});
+    throw e;
+  } finally {
+    cliente.release();
+  }
+}
+
+// Reservas que quedaron PENDIENTES (pago sin respuesta) hace más de `segundos`.
+async function pendientesDesde(segundos) {
+  const { rows } = await db.query(
+    `SELECT ${RESERVA} FROM reservas.reservas
+     WHERE estado = 'PENDIENTE' AND creada_en < now() - make_interval(secs => $1) ORDER BY id LIMIT 50`,
+    [segundos]
   );
-  return rows[0];
+  return rows;
 }
 
 async function listarPorUsuario(usuarioId, rol) {
@@ -32,14 +60,6 @@ async function obtener(id) {
   return rows[0] || null;
 }
 
-async function obtenerPago(reservaId) {
-  const { rows } = await db.query(
-    'SELECT id, reserva_id, monto, referencia, pagado_en FROM reservas.pagos WHERE reserva_id = $1',
-    [reservaId]
-  );
-  return rows[0] || null;
-}
-
 // UPDATE condicional: solo cambia si sigue CONFIRMADA.
 async function marcarDictada(id) {
   const { rows } = await db.query(
@@ -49,18 +69,21 @@ async function marcarDictada(id) {
   return rows[0] || null;
 }
 
-// Alimenta la búsqueda de docentes (Núcleo la consulta por HTTP interno).
+// Alimenta la búsqueda de docentes. Una reserva PENDIENTE también ocupa el horario.
 async function horariosOcupados(docenteId) {
-  const { rows } = await db.query('SELECT horario_id FROM reservas.reservas WHERE docente_id = $1', [docenteId]);
+  const { rows } = await db.query(
+    "SELECT horario_id FROM reservas.reservas WHERE docente_id = $1 AND estado <> 'CANCELADA'",
+    [docenteId]
+  );
   return rows.map((r) => r.horario_id);
 }
 
 async function horariosOcupadosDe(docenteIds) {
   const { rows } = await db.query(
-    'SELECT docente_id, horario_id FROM reservas.reservas WHERE docente_id = ANY($1::int[])',
+    "SELECT docente_id, horario_id FROM reservas.reservas WHERE docente_id = ANY($1::int[]) AND estado <> 'CANCELADA'",
     [docenteIds]
   );
   return rows;
 }
 
-module.exports = { horariosOcupadosDe, insertarReserva, insertarPago, listarPorUsuario, obtener, obtenerPago, marcarDictada, horariosOcupados };
+module.exports = { insertarPendiente, resolver, pendientesDesde, listarPorUsuario, obtener, marcarDictada, horariosOcupados, horariosOcupadosDe };

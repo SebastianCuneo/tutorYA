@@ -20,4 +20,22 @@ async function getJson(url, { timeoutMs = config.get('http.timeoutMs') } = {}) {
   return { status: res.status, body };
 }
 
-module.exports = { getJson };
+// POST con body JSON (UT5: Reservas -> Pagos). Mismo contrato que getJson.
+async function postJson(url, datos, { timeoutMs = config.get('http.timeoutMs'), headers = {} } = {}) {
+  const requestId = contexto.requestId();
+  const res = await fetch(url, {
+    method: 'POST',
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: { 'Content-Type': 'application/json', ...(requestId ? { 'X-Request-Id': requestId } : {}), ...headers },
+    body: JSON.stringify(datos),
+  });
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    /* sin body JSON */
+  }
+  return { status: res.status, body };
+}
+
+module.exports = { getJson, postJson };
